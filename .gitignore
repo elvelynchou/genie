@@ -1,0 +1,25 @@
+# Environments
+.env
+.venv
+venv/
+ENV/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Downloads and data
+downloads/
+*.md (except README.md and GEMINI.md)
+!README.md
+!GEMINI.md
+!genieprd.md
+
+# Logs
+*.log
+logs/
+
+# References (large or external)
+references/
