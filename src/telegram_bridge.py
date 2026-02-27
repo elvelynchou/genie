@@ -20,6 +20,7 @@ from agents.common.video_downloader import VideoDownloaderAgent
 from agents.common.file_sender import FileSenderAgent
 from agents.common.github_analyzer import GithubAnalyzerAgent
 from agents.common.gemini_cli_agent import GeminiCLIAgent
+from agents.common.browser_agent import BrowserAgent
 from scheduler_manager import SchedulerManager
 
 # Load environment variables
@@ -47,6 +48,7 @@ registry.register_agent(VideoDownloaderAgent())
 registry.register_agent(FileSenderAgent(bot_instance=bot))
 registry.register_agent(GithubAnalyzerAgent(orchestrator=orchestrator))
 registry.register_agent(GeminiCLIAgent())
+registry.register_agent(BrowserAgent())
 
 # Initialize Scheduler
 scheduler_mgr = SchedulerManager(bot, redis_mgr, orchestrator, ADMIN_CHAT_ID)

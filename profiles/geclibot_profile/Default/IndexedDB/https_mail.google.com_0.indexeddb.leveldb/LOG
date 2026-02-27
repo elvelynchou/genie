@@ -1,0 +1,2 @@
+2026/02/27-04:20:32.687 513c9 Creating DB /etc/myapp/genie/profiles/geclibot_profile/Default/IndexedDB/https_mail.google.com_0.indexeddb.leveldb since it was missing.
+2026/02/27-04:20:32.690 513c9 Reusing MANIFEST /etc/myapp/genie/profiles/geclibot_profile/Default/IndexedDB/https_mail.google.com_0.indexeddb.leveldb/MANIFEST-000001

@@ -59,17 +59,31 @@ class BaseAgent(ABC):
             )
 
     def get_tool_declaration(self) -> Dict[str, Any]:
-        """Generates a clean JSON Schema for Gemini Tool definition."""
+        """Generates a strictly compliant JSON Schema for Gemini Tool definition."""
         schema = self.input_schema.model_json_schema()
-        # Remove Pydantic internal fields that Gemini doesn't like
-        schema.pop("title", None)
-        schema.pop("description", None)
-        if "properties" in schema:
-            for prop in schema["properties"].values():
-                prop.pop("title", None)
         
+        def clean_schema(obj):
+            if not isinstance(obj, dict):
+                return obj
+            
+            # Fields allowed by Gemini Function Declaration
+            allowed_fields = {"type", "properties", "required", "items", "description", "enum", "format"}
+            
+            # Create a copy to avoid mutation issues during iteration
+            cleaned = {k: clean_schema(v) for k, v in obj.items() if k in allowed_fields}
+            
+            # Special case: if it's an object type, ensure properties exists if needed
+            if obj.get("type") == "object" and "properties" in obj:
+                cleaned["properties"] = {k: clean_schema(v) for k, v in obj["properties"].items()}
+            
+            # Special case: handle arrays
+            if obj.get("type") == "array" and "items" in obj:
+                cleaned["items"] = clean_schema(obj["items"])
+                
+            return cleaned
+
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": schema
+            "parameters": clean_schema(schema)
         }
