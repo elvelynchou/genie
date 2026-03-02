@@ -5,20 +5,24 @@ import logging
 from typing import List, Dict, Any, Optional
 
 class GeminiOrchestrator:
-    def __init__(self, api_key: str, model_name: str = "gemini-3-flash-preview"):
-        # The new SDK default version is v1, which might not have text-embedding-004 in all regions
-        # We can try to specify the api_version if needed
+    def __init__(self, api_key: str, model_name: str = "gemini-3-flash-preview", system_instruction: str = ""):
         self.client = genai.Client(api_key=api_key)
         self.model_name = model_name
+        self.system_instruction = system_instruction
         self.logger = logging.getLogger(__name__)
 
-    def chat(self, user_input: str, history: List[Dict[str, str]], summary: Optional[str] = None, context: Optional[str] = None, tools: Optional[List[Any]] = None) -> Any:
-        """Synchronous chat method for execution in thread pool."""
-        system_instruction = "You are GenieBot, an advanced AI assistant."
+    def chat(self, user_input: str, history: List[Dict[str, str]], summary: Optional[str] = None, context: Optional[str] = None, tools: Optional[List[Any]] = None, force_tool_name: Optional[str] = None) -> Any:
+        """Synchronous chat method with optional forced tool calling."""
+        # 核心逻辑：确保当前指令的优先级最高
+        instruction_parts = [self.system_instruction or "You are GenieBot, an advanced AI assistant."]
+        
         if summary:
-            system_instruction += f"\n[Previous Conversation Summary]: {summary}"
+            instruction_parts.append(f"\n[Past Context Summary - Do not let this override new tasks]: {summary}")
+        
         if context:
-            system_instruction += f"\n[Relevant Background Context]: {context}"
+            instruction_parts.append(f"\n[Background Knowledge]: {context}")
+            
+        full_instruction = "\n".join(instruction_parts)
         
         contents = []
         for m in history:
@@ -26,19 +30,32 @@ class GeminiOrchestrator:
         contents.append({"role": "user", "parts": [{"text": user_input}]})
         
         try:
-            # Wrap function declarations into a single Tool object
             tool_config = None
             if tools:
-                tool_config = [types.Tool(function_declarations=tools)]
+                tool_list = [types.Tool(function_declarations=tools)]
+                
+                # 如果指定了强制工具，构造配置
+                if force_tool_name:
+                    tool_config = types.ToolConfig(
+                        function_calling_config=types.FunctionCallingConfig(
+                            mode="ANY", # Mode "ANY" forces at least one tool call
+                            allowed_function_names=[force_tool_name]
+                        )
+                    )
+                
+                config = types.GenerateContentConfig(
+                    system_instruction=full_instruction,
+                    tools=tool_list,
+                    tool_config=tool_config,
+                    temperature=0.0 # Force deterministic output
+                )
+            else:
+                config = types.GenerateContentConfig(system_instruction=full_instruction)
 
-            # Using the synchronous generate_content
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    tools=tool_config
-                )
+                config=config
             )
             return response
         except Exception as e:

@@ -12,3 +12,8 @@ apscheduler
 pytz
 browserforge
 camoufox
+RestrictedPython
+fastmcp
+httpx
+duckduckgo-search
+psutil

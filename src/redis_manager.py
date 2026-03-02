@@ -34,6 +34,11 @@ class RedisManager:
         key = f"history:{chat_id}"
         self.client.ltrim(key, -keep_last, -1)
 
+    async def clear_history(self, chat_id: str):
+        """Clear L1 history for a specific chat."""
+        key = f"history:{chat_id}"
+        self.client.delete(key)
+
     async def set_summary(self, chat_id: str, summary_text: str):
         key = f"summary:{chat_id}"
         self.client.set(key, summary_text)

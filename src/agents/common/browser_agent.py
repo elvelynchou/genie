@@ -118,9 +118,17 @@ class BrowserAgent(BaseAgent):
         results = []
         for i, item in enumerate(actions):
             action = item.get("action")
+            # Robust parameter extraction: handle both nested 'params' and flat dict
             p = item.get("params", {})
+            if not isinstance(p, dict): p = {}
+            # Fallback to item itself if params is empty
+            effective_params = {**item, **p}
+            
             if action == "goto":
-                await page.get(p.get("url"))
+                url = effective_params.get("url")
+                if not url:
+                    raise ValueError(f"Action 'goto' missing 'url' parameter in {item}")
+                await page.get(url)
             elif action == "extract_semantic":
                 try:
                     ax_nodes = await page.send(uc.cdp.accessibility.get_full_ax_tree())
@@ -136,18 +144,32 @@ class BrowserAgent(BaseAgent):
                 except Exception as e:
                     self.logger.warning(f"Semantic extraction failed: {e}")
             elif action == "click_node":
-                backend_id = p.get("backend_id")
+                backend_id = effective_params.get("backend_id")
+                if not backend_id:
+                    raise ValueError(f"Action 'click_node' missing 'backend_id'")
                 obj = await page.send(uc.cdp.dom.resolve_node(backend_node_id=backend_id))
                 await page.send(uc.cdp.runtime.call_function_on(
                     function_declaration="(elem) => elem.click()",
                     object_id=obj.object_id
                 ))
             elif action == "click":
-                elem = await page.select(p.get("selector")) if p.get("selector") else await page.find(p.get("text"), best_match=True)
-                await elem.click()
+                selector = effective_params.get("selector")
+                text = effective_params.get("text")
+                if selector:
+                    elem = await page.select(selector)
+                    await elem.click()
+                elif text:
+                    elem = await page.find(text, best_match=True)
+                    await elem.click()
+                else:
+                    raise ValueError(f"Action 'click' requires 'selector' or 'text'")
             elif action == "type":
-                elem = await page.select(p.get("selector"))
-                for char in p.get("text"):
+                selector = effective_params.get("selector")
+                text = effective_params.get("text")
+                if not selector or text is None:
+                    raise ValueError(f"Action 'type' requires 'selector' and 'text'")
+                elem = await page.select(selector)
+                for char in str(text):
                     await elem.send_keys(char)
                     await asyncio.sleep(random.uniform(0.05, 0.15))
             elif action == "snapshot":
@@ -155,7 +177,8 @@ class BrowserAgent(BaseAgent):
                 await page.save_screenshot(path)
                 results.append({"type": "screenshot", "file_path": path})
             elif action == "wait":
-                await asyncio.sleep(p.get("seconds", 5))
+                seconds = effective_params.get("seconds", 5)
+                await asyncio.sleep(float(seconds))
             logs.append({"step": f"action_{i+1}", "action": action})
         return results
 
@@ -165,24 +188,34 @@ class BrowserAgent(BaseAgent):
         for i, item in enumerate(actions):
             action = item.get("action")
             p = item.get("params", {})
+            if not isinstance(p, dict): p = {}
+            effective_params = {**item, **p}
+
             if action == "goto":
-                await page.goto(p.get("url"))
+                url = effective_params.get("url")
+                if not url: raise ValueError("goto requires url")
+                await page.goto(url)
             elif action == "extract_semantic":
-                # For playwright, we can use accessibility snapshot
                 tree = await page.accessibility.snapshot()
                 results.append({"type": "semantic_tree", "data": tree})
             elif action == "click":
-                if p.get("selector"):
-                    await page.click(p.get("selector"))
-                else:
-                    await page.get_by_text(p.get("text")).click()
+                selector = effective_params.get("selector")
+                text = effective_params.get("text")
+                if selector:
+                    await page.click(selector)
+                elif text:
+                    await page.get_by_text(text).click()
             elif action == "type":
-                await page.fill(p.get("selector"), p.get("text"))
+                selector = effective_params.get("selector")
+                text = effective_params.get("text")
+                if selector and text is not None:
+                    await page.fill(selector, str(text))
             elif action == "snapshot":
                 path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}_fox.png")
                 await page.screenshot(path=path)
                 results.append({"type": "screenshot", "file_path": path})
             elif action == "wait":
-                await asyncio.sleep(p.get("seconds", 5))
+                seconds = effective_params.get("seconds", 5)
+                await asyncio.sleep(float(seconds))
             logs.append({"step": f"action_{i+1}", "action": action})
         return results

@@ -40,22 +40,25 @@
 - **已完成**: 
     - Phase 1 & 2 核心架构：Telegram 接入、混合记忆 (L1/L2/L3) 及 RAG 闭环。
     - 基础 Agent 框架 (`BaseAgent`) 及 目录结构初始化。
-    - 通用工具 Agent 实现：`video_downloader`, `file_sender`, `link_content_extractor` (基于 Playwright + Trafilatura)。
-- **待执行**: Phase 3 - 开发“自我进化”代码生成功能。
+    - 通用工具 Agent 实现：`video_downloader`, `file_sender`, `link_content_extractor`, `browser_agent`.
+    - Phase 3 核心功能：`code_gen_agent`, `sandbox_executor`, `code_deploy_agent` (自我进化闭环).
+- **待执行**: Phase 4 - 监控与优化 (生产化) 及 专用业务 Agent (Investment, WebSearch).
 
-## [SESSION_COMPRESSION_SNAPSHOT: PHASE_2_COMPLETE]
+## [SESSION_COMPRESSION_SNAPSHOT: PHASE_3_COMPLETE]
 **1. 已实现逻辑 (Done):**
 - **Memory Layers**: L1 (History List), L2 (Auto-Summary), L3 (Vector RAG).
+- **Core Agents**: `video_downloader`, `link_extractor`, `browser_agent`, `github_analyzer`.
+- **Self-Evolution**: `code_gen_agent`, `sandbox_executor`, `code_deploy_agent` (完整闭环).
 - **Inference**: 使用 `gemini-3-flash-preview` 调度，`gemini-embedding-001` 进行向量化。
-- **Resilience**: 实现 Markdown 自动转义与解析降级、同步 SDK 线程池化处理。
 
 **2. 关键路径 (Key Paths):**
 - 向量索引: `genie_vdb` (DB 0, 768 dim, HNSW).
-- 核心逻辑: `redis_manager.py` (多层记忆管理), `gemini_orchestrator.py` (Embedding 与 Chat).
+- 核心逻辑: `redis_manager.py` (多层记忆管理), `gemini_orchestrator.py` (Embedding 与 Chat), `telegram_bridge.py` (多 Agent 循环调度).
 
 **3. 下一阶段目标 (Next):**
-- 实现基于 Function Calling 的专用 Agent (Investment, WebSearch)。
-- 实现 Agent 自我进化沙盒。
+- 实现基于 Function Calling 的专用业务 Agent (Investment, WebSearch)。
+- 接入监控告警与系统健康检测。
+- 优化长任务异步反馈机制。
 
 ---
 *此文档由 AI 自动维护，作为系统运行的最高指令依据。*

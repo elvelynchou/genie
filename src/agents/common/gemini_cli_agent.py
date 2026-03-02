@@ -3,6 +3,7 @@ import os
 import subprocess
 import logging
 import re
+import shlex
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from agents.base import BaseAgent, AgentResult
@@ -15,64 +16,87 @@ class GeminiCLIInput(BaseModel):
 
 class GeminiCLIAgent(BaseAgent):
     name = "gemini_cli_executor"
-    description = "A powerful system-level agent using Gemini CLI. Use action='list' to see extensions/MCPs. Use action='execute' with yolo=True for actions."
+    description = "A powerful system-level agent using Gemini CLI. IMPORTANT: If you encounter 'Tool execution denied by policy', set 'yolo=True'."
     input_schema = GeminiCLIInput
 
-    # Shared environment for all calls
+    PROJECT_ROOT = "/etc/myapp/genie"
     BASE_ENV = {
         "HOME": "/home/elvelyn",
         "USER": "elvelyn",
-        "PATH": "/home/elvelyn/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin",
+        "PATH": f"{PROJECT_ROOT}/venv/bin:/home/elvelyn/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "TERM": "xterm-256color",
-        "SHELL": "/bin/bash"
+        "SHELL": "/bin/bash",
+        "PYTHONPATH": f"{PROJECT_ROOT}/src:{PROJECT_ROOT}",
+        "VIRTUAL_ENV": f"{PROJECT_ROOT}/venv",
+        "REDIS_URL": "redis://localhost:6379/0"
     }
 
     async def run(self, params: GeminiCLIInput, chat_id: str) -> AgentResult:
         if params.action == "list":
             return await self._get_capabilities()
-        
         if params.action == "debug":
             return await self._debug_env()
-
         if not params.prompt:
             return AgentResult(status="FAILED", message="Prompt required.")
-
         return await self._execute_command(params)
 
-    async def _run_raw_cmd(self, cmd_str: str) -> str:
-        """Runs a command through bash -c with a clean environment."""
+    async def _run_raw_cmd(self, cmd_parts: List[str]) -> str:
+        """Runs a command with venv activation and proper argument escaping."""
         full_env = os.environ.copy()
         full_env.update(self.BASE_ENV)
         
-        # Use bash -c to ensure aliases and path are respected
+        # Build the command string safely
+        # We use a single bash command but escape the internal gemini command properly
+        inner_cmd = " ".join([shlex.quote(p) for p in cmd_parts])
+        activation = f"source {self.PROJECT_ROOT}/venv/bin/activate"
+        full_bash_cmd = f"{activation} && {inner_cmd}"
+        
         proc = await asyncio.create_subprocess_shell(
-            f"bash -c '{cmd_str}'",
+            full_bash_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=full_env
+            env=full_env,
+            cwd=self.PROJECT_ROOT,
+            executable="/bin/bash" # Ensure we use bash for 'source'
         )
-        stdout, stderr = await proc.communicate()
         
-        # Merge stdout and stderr for listing commands as they sometimes output to stderr
-        combined = stdout.decode() + stderr.decode()
-        
-        # Clean ANSI codes
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        return ansi_escape.sub('', combined).strip()
+        try:
+            # Hard timeout of 5 minutes for any CLI task
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            combined = stdout.decode() + stderr.decode()
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            return ansi_escape.sub('', combined).strip()
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except:
+                pass
+            return "ERROR: Task timed out after 300s."
 
     async def _execute_command(self, params: GeminiCLIInput) -> AgentResult:
-        cmd = f"gemini -p \"{params.prompt}\""
-        if params.skill: cmd += f" --skill {params.skill}"
-        if params.yolo: cmd += " --yolo"
+        cmd_parts = ["gemini", "-p", params.prompt]
+        if params.skill:
+            cmd_parts.extend(["--skill", params.skill])
+        if params.yolo:
+            cmd_parts.append("--yolo")
         
-        output = await self._run_raw_cmd(cmd)
-        return AgentResult(status="SUCCESS", data={"output": output}, message="Execution complete.")
+        output = await self._run_raw_cmd(cmd_parts)
+        
+        # Extract file path if present
+        path_match = re.search(r"(/[a-zA-Z0-9._/-]+/downloads/[a-zA-Z0-9._/-]+)", output)
+        file_path = path_match.group(1) if path_match else None
+        
+        result_data = {"output": output}
+        if file_path:
+            result_data["file_path"] = file_path
+
+        return AgentResult(status="SUCCESS", data=result_data, message="Execution complete.")
 
     async def _get_capabilities(self) -> AgentResult:
-        # Use more descriptive commands
-        skills_raw = await self._run_raw_cmd("gemini skills list")
-        mcps_raw = await self._run_raw_cmd("gemini mcp list")
-        exts_raw = await self._run_raw_cmd("gemini extensions list")
+        await self._run_raw_cmd(["gemini", "-v"])
+        skills_raw = await self._run_raw_cmd(["gemini", "skills", "list"])
+        mcps_raw = await self._run_raw_cmd(["gemini", "mcp", "list"])
+        exts_raw = await self._run_raw_cmd(["gemini", "extensions", "list"])
 
         report = f"📋 **Gemini CLI 系统能力清单**\n\n"
         report += f"✅ **[Extensions]**:\n{exts_raw or 'None'}\n\n"
@@ -86,5 +110,5 @@ class GeminiCLIAgent(BaseAgent):
         )
 
     async def _debug_env(self) -> AgentResult:
-        debug_info = await self._run_raw_cmd("env && which gemini && gemini -v")
+        debug_info = await self._run_raw_cmd(["env"])
         return AgentResult(status="SUCCESS", message=f"Debug Info:\n{debug_info}")

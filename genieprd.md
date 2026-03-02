@@ -48,14 +48,20 @@
 - [x] 配置 Redis Search 索引，实现 L3 长期记忆检索。
 - [x] 调通 gemini-embedding-001 向量模型。
 
-### Phase 3: 高级智能与专用 Agent (进行中)
-- [x] 实现基于 Function Calling 的多 Agent 协同循环逻辑。
-- [x] 开发 `video_downloader`：支持多平台视频下载。
+### Phase 3: 高级智能与专用 Agent - ✅ 已完成 (2026-03-01)
+- [x] 实现基于 Function Calling 的多 Agent 协同循环逻辑 (Reasoning Loop)。
+- [x] 开发 `video-downloader`：基于 Gemini CLI Skill 模式的 X/YouTube 视频下载。
+- [x] 开发 `x-tweet-fetcher`：基于 Gemini CLI Skill 模式的推文抓取与 MD 存档。
 - [x] 开发 `link_content_extractor`：基于 Playwright 的网页转 Markdown 工具。
-- [x] 开发 `file_sender`：通用的 Telegram 文件推送工具。
-- [ ] 开发 `code_gen_agent`：支持生成代码的自我进化 Agent。
-- [ ] 实现受限的 Python 执行沙盒。
-- [ ] Telegram 端代码部署审核流程。
+- [x] 开发 `stealth_browser`：集成 Camoufox & nodriver 的双引擎隐身浏览器。
+- [x] 实现分阶段任务反馈与心跳监控机制。
+
+### Phase 4: 自进化与安全 (自增强) - 进行中
+- [x] 环境准备：安装 RestrictedPython 沙箱环境。
+- [ ] 开发 `code_gen_agent`：根据自然语言生成 BaseAgent 子类。
+- [ ] 实现动态 Agent 热加载与部署审核流程。
+- [ ] 接入监控告警与系统健康检测。
+
 
 ### Phase 4: 监控与优化 (生产化)
 - [ ] 接入监控告警（System Health）。

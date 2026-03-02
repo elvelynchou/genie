@@ -16,7 +16,7 @@ class LinkExtractorInput(BaseModel):
 
 class LinkContentAgent(BaseAgent):
     name = "link_content_extractor"
-    description = "Extracts main content from a webpage and converts it to clean Markdown. Handles dynamic JavaScript content."
+    description = "Extracts main content from standard webpages and converts it to clean Markdown. DO NOT use this tool for X (Twitter), Weibo, or YouTube links; use specialized fetchers instead."
     input_schema = LinkExtractorInput
     
     DOWNLOAD_DIR = "/etc/myapp/genie/downloads"
