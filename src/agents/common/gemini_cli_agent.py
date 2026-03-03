@@ -82,13 +82,14 @@ class GeminiCLIAgent(BaseAgent):
         
         output = await self._run_raw_cmd(cmd_parts)
         
-        # Extract file path if present
-        path_match = re.search(r"(/[a-zA-Z0-9._/-]+/downloads/[a-zA-Z0-9._/-]+)", output)
-        file_path = path_match.group(1) if path_match else None
+        # Extract file paths if present (downloads, img_output, nanobanana-output)
+        path_matches = re.findall(r"(/[a-zA-Z0-9._/-]+/(?:downloads|img_output|nanobanana-output)/[a-zA-Z0-9._/-]+(?:png|jpg|jpeg|mp4))", output)
+        file_paths = list(dict.fromkeys(path_matches)) # remove duplicates
         
         result_data = {"output": output}
-        if file_path:
-            result_data["file_path"] = file_path
+        if file_paths:
+            result_data["file_path"] = file_paths[0]
+            result_data["all_paths"] = file_paths
 
         return AgentResult(status="SUCCESS", data=result_data, message="Execution complete.")
 

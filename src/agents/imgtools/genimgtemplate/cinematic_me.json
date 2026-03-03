@@ -1,0 +1,21 @@
+{
+  "template_metadata": {
+    "name": "cinematic_me",
+    "created_at": "2026-03-02T14:49:50.847636",
+    "chat_id": "550914711"
+  },
+  "core_instructions": "Maintain the exact facial structure, skin tone, eye color, and unique features of the person in the reference image. Do not alter the identity; ensure the subject remains consistently recognizable as the same individual across all generated variations.",
+  "visual_details": {
+    "subject": "A beautiful young East Asian woman with a slender and elegant build.",
+    "camera": "Portrait orientation, medium shot, eye-level angle, shallow depth of field with significant background blur.",
+    "environment": "A dark, minimalist background with soft, out-of-focus golden and orange bokeh lights, creating a moody and sophisticated atmosphere.",
+    "accessories": "Large, blue teardrop-shaped dangling earrings that match the color of the dress.",
+    "lighting": "Soft, cinematic studio lighting that highlights her skin and the texture of her hair, with a gentle glow on her shoulders.",
+    "clothing": "Form-fitting, sleeveless, high-neck midi dress in a vibrant blue color, covered in a dense pattern of small white and light blue flowers with red centers.",
+    "style": "Highly detailed digital realism, polished aesthetic, smooth skin textures, reminiscent of high-end character concept art.",
+    "posing": "Standing waist-up portrait, hands positioned behind her back, body angled slightly to the side with a graceful posture.",
+    "face": "The face, facial structure, features, skin tone, and expression must match the reference image exactly.",
+    "hair": "The hair color, length, style (high ponytail with bangs), and texture must match the reference image exactly."
+  },
+  "usage_hint": "Pass this template to any image generator agent with an image reference."
+}

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "nanobanana": {
+      "command": "node",
+      "args": [
+        "/home/elvelyn/.gemini/extensions/nanobanana/mcp-server/dist/index.js"
+      ],
+      "env": {
+        "NANOBANANA_GEMINI_API_KEY": "AIzaSyBILOwZgZI4hv5iNE__nsQGkAVHQCjS5iU",
+        "GEMINI_API_KEY": "AIzaSyBILOwZgZI4hv5iNE__nsQGkAVHQCjS5iU"
+      }
+    }
+  }
+}

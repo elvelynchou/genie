@@ -1,0 +1,21 @@
+{
+  "template_metadata": {
+    "name": "color_nostalgic_woman",
+    "created_at": "2026-03-03T01:56:27.040276",
+    "chat_id": "550914711"
+  },
+  "core_instructions": "Strictly maintain the facial features, hair style, and physical build of the woman from the reference image. Ensure the basket and flowers are rendered in natural, vibrant colors.",
+  "visual_details": {
+    "subject": "A young woman walking away in a narrow alleyway.",
+    "clothing": "A long, flowing, cream-colored long-sleeve dress made of textured linen, paired with simple flat leather sandals.",
+    "hair": "Dark hair pulled back into a neat low bun at the nape of her neck.",
+    "camera": "Medium shot, eye-level perspective, shallow depth of field with a blurred background.",
+    "environment": "A narrow, weathered urban alleyway with warm-toned stone walls, overhead utility wires, and a soft, out-of-focus background of old Mediterranean-style buildings.",
+    "style": "Cinematic color photography with a nostalgic aesthetic, rich natural colors, and a subtle film grain.",
+    "face": "Seen in profile, looking slightly to her left with a serene and contemplative expression.",
+    "posing": "Walking away from the viewer down a path, body slightly angled to the side as she glances over her shoulder.",
+    "accessories": "A large, rustic wicker basket overflowing with a colorful bouquet of wildflowers (pinks, yellows, and greens), carried behind her back.",
+    "lighting": "Natural, warm golden hour light creating soft highlights on the subject and gentle shadows."
+  },
+  "usage_hint": "Pass this template to any image generator agent with an image reference."
+}

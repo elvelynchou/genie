@@ -1,0 +1,21 @@
+{
+  "template_metadata": {
+    "name": "japanese_kimono_portrait",
+    "created_at": "2026-03-03T05:59:22.452500",
+    "chat_id": "550914711"
+  },
+  "core_instructions": "Strictly maintain the facial features, bone structure, and identity of the person in the reference image. Do not alter the ethnicity, age, or unique facial characteristics. The kimono and environment should be generated based on the prompt, but the person's face must remain consistent with the source.",
+  "visual_details": {
+    "clothing": "An ornate black silk kimono featuring intricate gold, silver, and orange floral patterns. A wide, decorative orange and red obi sash with elaborate knotting and floral accents. A visible white inner collar.",
+    "lighting": "Dramatic backlighting from the large lantern creating a warm rim light around the subject's silhouette and hair. Soft, warm directional light from the front highlights the facial details and kimono texture.",
+    "environment": "A dark, atmospheric indoor setting. Behind the subject is a large, glowing spherical paper lantern that resembles a full moon, surrounded by branches of white cherry blossoms in soft focus.",
+    "posing": "Standing in a three-quarter profile, gracefully tilting her head down and to the side. Her hands are positioned delicately at her waist.",
+    "hair": "The hair color, length, style, and texture must match the reference image exactly.",
+    "subject": "A young woman of East Asian descent.",
+    "style": "Cinematic and ethereal traditional Japanese aesthetic. High-contrast composition between the dark background and the glowing lantern.",
+    "accessories": "Intricate silver and pearl hair accessories, dangling floral-shaped earrings.",
+    "camera": "Medium waist-up shot, shallow depth of field, high-resolution detail, professional portrait photography.",
+    "face": "The face, facial structure, features, skin tone, and expression must match the reference image exactly."
+  },
+  "usage_hint": "Pass this template to any image generator agent with an image reference."
+}

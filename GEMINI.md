@@ -39,26 +39,27 @@
 ## 当前状态 (Current State)
 - **已完成**: 
     - Phase 1 & 2 核心架构：Telegram 接入、混合记忆 (L1/L2/L3) 及 RAG 闭环。
-    - 基础 Agent 框架 (`BaseAgent`) 及 目录结构初始化。
-    - 通用工具 Agent 实现：`video_downloader`, `file_sender`, `link_content_extractor`, `browser_agent`.
-    - Phase 3 核心功能：`code_gen_agent`, `sandbox_executor`, `code_deploy_agent` (自我进化闭环).
-- **待执行**: Phase 4 - 监控与优化 (生产化) 及 专用业务 Agent (Investment, WebSearch).
+    - Phase 3 核心功能：多 Agent 协同循环、超级隐身浏览器、Skill 插件化架构。
+    - Phase 3.5 多模态集成：图片感知 (`image_ocr`, `prompt_inverse`)，模板引擎 (`genimgtemplate`)，与生图后端 (`nanobanana`, `vertex_generator`)。
+- **待执行**: Phase 4 - 自我进化闭环 (Code Gen & Deploy)。
 
-## [SESSION_COMPRESSION_SNAPSHOT: PHASE_3_COMPLETE]
+## [SESSION_COMPRESSION_SNAPSHOT: PHASE_3_5_MULTIMODAL_COMPLETE]
 **1. 已实现逻辑 (Done):**
-- **Memory Layers**: L1 (History List), L2 (Auto-Summary), L3 (Vector RAG).
-- **Core Agents**: `video_downloader`, `link_extractor`, `browser_agent`, `github_analyzer`.
-- **Self-Evolution**: `code_gen_agent`, `sandbox_executor`, `code_deploy_agent` (完整闭环).
-- **Inference**: 使用 `gemini-3-flash-preview` 调度，`gemini-embedding-001` 进行向量化。
+- **Unified Image Bus**: `telegram_bridge.py` 自动拦截 Telegram 图片并持久化至 `uploads/`。
+- **Perception Agents**: `ImageOCRAgent` (文本提取) 与 `PromptInverseAgent` (逆向解析生图 Prompt + 强结构化 JSON 存档)。
+- **Template Engine**: `TemplateCreatorAgent` 实现带 "Identity Lock" 的结构化参数合并，支持复用。
+- **Generation Backends**: 
+  - `VertexGenAgent`: 基于 Google GenAI (Imagen 3) 异步 API 的原生接入，具备指数退避抗 429 机制。
+  - `Nanobanana MCP`: 深度封装进 `gemini_cli_executor`，通过物理级意图隔离防止路由跑偏，支持多图清洗。
+- **UX & Control**: `/generate` 与 `/edit` 强引导快捷命令；产出图片自动集中在 `img_output/` 不删档。
 
 **2. 关键路径 (Key Paths):**
-- 向量索引: `genie_vdb` (DB 0, 768 dim, HNSW).
-- 核心逻辑: `redis_manager.py` (多层记忆管理), `gemini_orchestrator.py` (Embedding 与 Chat), `telegram_bridge.py` (多 Agent 循环调度).
+- 视觉资产: `uploads/` (原图), `src/agents/imgtools/characters/` (人物), `img_output/` (产出)。
+- 模板仓库: `src/agents/imgtools/genimgtemplate/`。
 
 **3. 下一阶段目标 (Next):**
-- 实现基于 Function Calling 的专用业务 Agent (Investment, WebSearch)。
-- 接入监控告警与系统健康检测。
-- 优化长任务异步反馈机制。
+- 实现 Agent 自我进化沙盒：`code_gen` -> `sandbox` -> `deploy`。
+- ModelScope API 等扩展模型接入评估。
 
 ---
 *此文档由 AI 自动维护，作为系统运行的最高指令依据。*

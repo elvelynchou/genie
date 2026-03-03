@@ -1,0 +1,21 @@
+{
+  "template_metadata": {
+    "name": "noblewoman_portrait",
+    "created_at": "2026-03-03T04:19:59.288493",
+    "chat_id": "550914711"
+  },
+  "core_instructions": "Maintain the exact facial features, blue-grey eye color, honey-blonde hair texture, and elegant noblewoman persona of the subject in all generated images. The facial structure and serene expression must remain consistent.",
+  "visual_details": {
+    "camera": "Portrait shot at eye-level, using a shallow depth of field that keeps the subject in sharp focus while softly blurring the architectural and floral background.",
+    "posing": "Classical half-length portrait pose, body slightly angled with the face turned towards the viewer, and hands gently clasped together in front.",
+    "lighting": "Soft, warm, diffused natural lighting that creates a gentle glow on the subject's skin and highlights the intricate textures of the lace and pearls.",
+    "accessories": "A triple-strand pearl necklace, matching pearl drop earrings, a delicate pearl bracelet on the wrist, and a simple gold ring on her hand.",
+    "clothing": "An intricate off-the-shoulder cream-colored lace gown featuring multiple layers of delicate ruffles, translucent billowy sleeves, and ornate pearl embroidery decorating the bodice and cinched waistline.",
+    "style": "Classical 19th-century oil painting style, characterized by fine brushwork, a muted and warm color palette, and a romantic, idealized aesthetic.",
+    "hair": "Long, voluminous wavy honey-blonde hair, parted in the center and cascading freely over her shoulders and down her back.",
+    "environment": "An ethereal outdoor garden setting featuring a stone gothic-style archway with ornate tracery, blooming white rose bushes, and a soft, hazy background of distant trees under a pale sky.",
+    "subject": "A young noblewoman with a graceful and elegant demeanor, appearing as a figure from a historical or fantasy royal setting.",
+    "face": "Fair complexion with soft facial features, a serene expression, striking blue-grey eyes accented with subtle pink eyeshadow, and natural-toned pink lips."
+  },
+  "usage_hint": "Pass this template to any image generator agent with an image reference."
+}
