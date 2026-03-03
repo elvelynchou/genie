@@ -4,6 +4,7 @@
 venv/
 ENV/
 env/
+.gemini/
 
 # Python cache
 __pycache__/
