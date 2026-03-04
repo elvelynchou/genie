@@ -1,0 +1,29 @@
+{
+  "finance_sources": [
+    {
+      "name": "Reuters_Markets",
+      "url": "https://www.reuters.com/markets/",
+      "category": "markets"
+    },
+    {
+      "name": "Reuters_Business",
+      "url": "https://www.reuters.com/business/",
+      "category": "business"
+    },
+    {
+      "name": "Yahoo_Finance",
+      "url": "https://finance.yahoo.com/markets/",
+      "category": "markets"
+    },
+    {
+      "name": "WSJ_Finance",
+      "url": "https://www.wsj.com/finance?mod=nav_top_section",
+      "category": "finance"
+    },
+    {
+      "name": "BBC_Business",
+      "url": "https://www.bbc.com/business",
+      "category": "business"
+    }
+  ]
+}

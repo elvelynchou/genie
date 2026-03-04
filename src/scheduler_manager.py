@@ -21,8 +21,32 @@ class SchedulerManager:
     def start(self):
         # 北京时间每天 10:00
         self.scheduler.add_job(self.daily_github_report, 'cron', hour=10, minute=0)
+        # 每隔 30 分钟执行一次财经监控
+        self.scheduler.add_job(self.half_hourly_finance_report, 'interval', minutes=30)
         self.scheduler.start()
-        logger.info("Scheduler started. Daily GitHub report set for 10:00 AM (Beijing Time).")
+        logger.info("Scheduler started. Daily GitHub report (10:00) and Finance Monitor (30m) active.")
+
+    async def half_hourly_finance_report(self):
+        """执行半小时一次的财经自动监控"""
+        if not self.admin_chat_id:
+            logger.error("ADMIN_CHAT_ID not set.")
+            return
+
+        logger.info("Starting scheduled finance monitoring...")
+        
+        monitor = registry.get_agent("finance_monitor")
+        # 模拟 Telegram 消息环境，但在后台静默执行
+        # 注意：Agent 内部会自动调用 file_sender 和存储 RAG
+        result = await monitor.execute(self.admin_chat_id)
+        
+        if result.status == "SUCCESS":
+            if "No new content" in result.message:
+                logger.info("Finance monitor: No new content found. Staying silent.")
+            else:
+                report_text = result.data.get("report", "")
+                await self.bot.send_message(self.admin_chat_id, f"📊 **财经自动快报 (30m)**：\n\n{report_text}")
+        else:
+            logger.error(f"Scheduled finance monitor failed: {result.errors}")
 
     async def daily_github_report(self, send_raw_files: bool = False):
         """执行每日 GitHub 趋势分析流"""

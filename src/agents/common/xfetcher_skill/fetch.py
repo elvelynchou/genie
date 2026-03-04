@@ -13,7 +13,7 @@ def parse_tweet_url(url: str):
     return match.group(1), match.group(2)
 
 def fetch_tweet(url):
-    download_dir = "/etc/myapp/genie/downloads"
+    download_dir = "/etc/myapp/genie/downloads/social"
     os.makedirs(download_dir, exist_ok=True)
     
     try:

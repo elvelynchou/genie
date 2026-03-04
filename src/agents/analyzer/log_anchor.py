@@ -63,9 +63,7 @@ class LogAnchorAgent(BaseAgent):
             file_path = os.path.join(self.LOG_DIR, file_name)
             
             with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"# Project State Anchor - {date_str}
-
-")
+                f.write(f"# Project State Anchor - {date_str}\n\n")
                 f.write(state_md)
             
             logs.append({"step": "log_saved", "path": file_path})

@@ -4,6 +4,7 @@ import logging
 import sys
 import json
 import shlex
+import hashlib
 from datetime import datetime
 
 # Ensure local imports work correctly
@@ -21,6 +22,8 @@ from agents.common.link_extractor import LinkContentAgent
 from agents.common.file_sender import FileSenderAgent
 from agents.analyzer.trend_analyzer import TrendAnalyzerAgent
 from agents.analyzer.memory_refiner import MemoryRefinerAgent
+from agents.investment.finance_monitor import FinanceMonitorAgent
+from agents.investment.finance_cleaner import FinanceCleanerAgent
 from agents.common.gemini_cli_agent import GeminiCLIAgent
 from agents.common.browser_agent import BrowserAgent
 from agents.imgtools.image_ocr import ImageOCRAgent
@@ -28,6 +31,7 @@ from agents.imgtools.prompt_inverse import PromptInverseAgent
 from agents.imgtools.template_creator import TemplateCreatorAgent
 from agents.imgtools.vertex_agent import VertexGenAgent
 from agents.imgtools.modelscope_agent import ModelScopeGenAgent
+from agents.analyzer.log_anchor import LogAnchorAgent
 from scheduler_manager import SchedulerManager
 
 # Load environment variables
@@ -50,14 +54,13 @@ redis_mgr.init_vector_index(dim=768)
 
 # Enhanced Orchestrator System Instruction
 system_instruction = """
-You are GenieBot, an autonomous and self-evolving Multi-Agent system. 
+You are GenieBot, an autonomous Multi-Agent system. 
 OPERATIONAL DIRECTIVES:
 1. GOAL PERSISTENCE: If a user gives a multi-step instruction, fulfill EVERY sub-task.
 2. METADATA REPORTING: Always report 'file_path' locations.
-3. SELF-EVOLUTION: If the user requests a new capability that doesn't exist among current agents, or for low-priority/periodic tasks, call 'gemini_cli_executor' with 'yolo=True' and use the 'skill-creator' skill to generate a new Pure Skill.
-4. OFFICIAL EXTENSIONS: For productivity tasks (Email, Calendar, Drive), prioritize using the official 'google-workspace' extension via 'gemini_cli_executor'.
-5. IMAGE WORKFLOW: Use 'prompt_inverse' then 'image_template_creator' for templating.
-6. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for X/video, Nanobanana, and Skill Creation tasks.
+3. IMAGE WORKFLOW: Use 'prompt_inverse' then 'image_template_creator' for templating.
+4. FINANCE PIPELINE: When monitoring finance, the system uses Browser -> Cleaner -> RAG -> Report. 
+5. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for X/video, Nanobanana, and Skill tasks.
 """
 orchestrator = GeminiOrchestrator(api_key=GEMINI_KEY, system_instruction=system_instruction)
 
@@ -66,6 +69,9 @@ registry.register_agent(LinkContentAgent())
 registry.register_agent(FileSenderAgent(bot_instance=bot))
 registry.register_agent(TrendAnalyzerAgent(orchestrator=orchestrator))
 registry.register_agent(MemoryRefinerAgent(orchestrator=orchestrator, redis_mgr=redis_mgr))
+registry.register_agent(LogAnchorAgent(orchestrator=orchestrator))
+registry.register_agent(FinanceMonitorAgent(orchestrator=orchestrator, redis_mgr=redis_mgr))
+registry.register_agent(FinanceCleanerAgent(orchestrator=orchestrator))
 registry.register_agent(GeminiCLIAgent())
 registry.register_agent(BrowserAgent())
 registry.register_agent(ImageOCRAgent(orchestrator=orchestrator))
@@ -105,36 +111,42 @@ async def safe_send_message(message_or_id, text: str):
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    await message.reply("GenieBot Bridge-03 Phase 4 Active.\nCognitive Refinement Engine: ONLINE")
+    await message.reply("GenieBot Bridge-03 Phase 4 Active.\nAdvanced Finance Pipeline: ONLINE")
 
 @dp.message(Command("run_report"))
 async def trigger_report(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    await message.answer("🚀 手动触发每日报告流...")
+    await message.answer("🚀 手动触发每日 GitHub 趋势报告流...")
     asyncio.create_task(scheduler_mgr.daily_github_report())
 
-@dp.message(Command("capabilities"))
-async def list_capabilities(message: types.Message):
+@dp.message(Command("run_finance"))
+async def trigger_finance(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    await message.answer("🔍 正在查询系统级能力清单...")
-    agent = registry.get_agent("gemini_cli_executor")
-    result = await agent.execute(str(message.chat.id), action="list")
-    await safe_send_message(message, result.message)
+    await message.answer("🚀 手动触发半小时财经监控流...")
+    asyncio.create_task(scheduler_mgr.half_hourly_finance_report())
+
+@dp.message(Command("anchor"))
+async def cmd_anchor(message: types.Message):
+    if not await is_allowed(message.from_user.id): return
+    chat_id = str(message.chat.id); history = await redis_mgr.get_history(chat_id)
+    focus = message.text.replace("/anchor", "").strip()
+    status = await message.answer("⚓ 正在固化项目状态快照...")
+    agent = registry.get_agent("log_anchor")
+    result = await agent.execute(chat_id, conversation_history=history, focus_topic=focus if focus else None)
+    await status.delete()
+    if result.status == "SUCCESS":
+        await message.answer(f"✅ 状态已固化：`{result.data['log_path']}`", parse_mode="Markdown")
+        await safe_send_message(message, result.data["content"])
+    else: await message.answer(f"❌ 固化失败: {result.errors}")
 
 @dp.message(Command("reset"))
 async def reset_session(message: types.Message):
     if not await is_allowed(message.from_user.id): return
     chat_id = str(message.chat.id)
-    
-    # 触发强制复盘 (Session Refinement before wipe)
     history = await redis_mgr.get_history(chat_id)
     if history:
-        refiner = registry.get_agent("memory_refiner")
-        # 异步启动，不阻塞重置响应
-        asyncio.create_task(refiner.execute(chat_id, history=history, session_status="RESET_BY_USER"))
-    
-    await redis_mgr.clear_history(chat_id)
-    redis_mgr.client.delete(f"summary:{chat_id}")
+        asyncio.create_task(registry.get_agent("memory_refiner").execute(chat_id, history=history, session_status="RESET_BY_USER"))
+    await redis_mgr.clear_history(chat_id); redis_mgr.client.delete(f"summary:{chat_id}")
     await message.answer("🔄 会话已复盘并重置。")
 
 def load_template_prompt(prompt_or_template: str) -> str:
@@ -142,191 +154,134 @@ def load_template_prompt(prompt_or_template: str) -> str:
     if os.path.exists(template_path):
         try:
             with open(template_path, "r", encoding="utf-8") as f:
-                tpl = json.load(f)
-                instr = tpl.get("core_instructions", "")
-                details = tpl.get("visual_details", {})
+                tpl = json.load(f); instr = tpl.get("core_instructions", ""); details = tpl.get("visual_details", {})
                 return f"{instr}\nVisual Details: {json.dumps(details)}"
-        except Exception as e:
-            logger.error(f"Failed to load template {template_path}: {e}")
+        except Exception as e: logger.error(f"Failed to load template {template_path}: {e}")
     return prompt_or_template
 
 async def finalize_nanobanana_output(chat_id: str, result_data: dict, message: types.Message):
-    all_paths = result_data.get("all_paths", [result_data.get("file_path")])
-    valid_paths = [p for p in all_paths if p and os.path.exists(p)]
-    
+    all_paths = result_data.get("all_paths", [result_data.get("file_path")]); valid_paths = [p for p in all_paths if p and os.path.exists(p)]
     if valid_paths:
         for idx, file_path in enumerate(valid_paths):
             if "nanobanana-output" in file_path:
-                img_output_dir = "/etc/myapp/genie/img_output"
-                os.makedirs(img_output_dir, exist_ok=True)
-                date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-                new_filename = f"nanobanana_{date_str}_{chat_id}_{idx}.png"
-                new_path = os.path.join(img_output_dir, new_filename)
-                os.rename(file_path, new_path)
-                file_path = new_path
-            
+                img_output_dir = "/etc/myapp/genie/img_output"; os.makedirs(img_output_dir, exist_ok=True)
+                new_filename = f"nanobanana_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}_{idx}.png"
+                new_path = os.path.join(img_output_dir, new_filename); os.rename(file_path, new_path); file_path = new_path
             await registry.get_agent("file_sender").execute(chat_id, file_path=file_path, delete_after_send=False)
-    else:
-        await safe_send_message(message, f"❌ 生图成功但未找到文件路径:\n{result_data.get('output', '')}")
+    else: await safe_send_message(message, f"❌ 生图成功但未找到路径:\n{result_data.get('output', '')}")
 
 @dp.message(Command("generate"))
 async def cmd_generate(message: types.Message):
     if not await is_allowed(message.from_user.id): return
     prompt = message.text.replace("/generate", "").strip()
-    if not prompt:
-        await message.answer("Usage: `/generate \"prompt\"`", parse_mode="Markdown")
-        return
-    
-    chat_id = str(message.chat.id)
-    status = await message.answer("🎨 正在启动 Nanobanana 文生图...")
+    if not prompt: await message.answer("Usage: `/generate \"prompt\"`", parse_mode="Markdown"); return
+    chat_id = str(message.chat.id); status = await message.answer("🎨 正在启动 Nanobanana...")
     agent = registry.get_agent("gemini_cli_executor")
-    result = await agent.execute(chat_id, action="execute", prompt=f"MUST USE TOOL 'nanobanana__generate_image'. Set preview=false --count=1. PROMPT: {load_template_prompt(prompt)}", yolo=True)
+    result = await agent.execute(chat_id, action="execute", prompt=f"MUST USE 'nanobanana__generate_image'. Set preview=false --count=1. PROMPT: {load_template_prompt(prompt)}", yolo=True)
     await status.delete()
-    if result.status == "SUCCESS":
-        await finalize_nanobanana_output(chat_id, result.data, message)
-    else:
-        await safe_send_message(message, f"❌ 失败: {result.errors}")
+    if result.status == "SUCCESS": await finalize_nanobanana_output(chat_id, result.data, message)
+    else: await safe_send_message(message, f"❌ 失败: {result.errors}")
 
 @dp.message(Command("edit"))
 async def cmd_edit(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    try:
-        args = shlex.split(message.text.replace("/edit", "").strip())
-    except ValueError:
-        await message.answer("❌ 参数解析失败。")
-        return
-    if len(args) < 2:
-        await message.answer("Usage: `/edit filename \"prompt\"`", parse_mode="Markdown")
-        return
-    chat_id = str(message.chat.id)
-    status = await message.answer(f"🎨 正在使用 {args[0]} 启动 Nanobanana 重绘...")
+    try: args = shlex.split(message.text.replace("/edit", "").strip())
+    except: await message.answer("❌ 参数解析失败。"); return
+    if len(args) < 2: await message.answer("Usage: `/edit filename \"prompt\"`", parse_mode="Markdown"); return
+    chat_id = str(message.chat.id); status = await message.answer(f"🎨 正在重绘 {args[0]}...")
     ref_path = os.path.join("/etc/myapp/genie/src/agents/imgtools/characters", args[0]) if "/" not in args[0] else args[0]
     agent = registry.get_agent("gemini_cli_executor")
-    result = await agent.execute(chat_id, action="execute", prompt=f"MUST USE TOOL 'nanobanana__edit_image'. Set preview=false --count=1. Input file: {ref_path}. PROMPT: {load_template_prompt(args[1])}", yolo=True)
+    result = await agent.execute(chat_id, action="execute", prompt=f"MUST USE 'nanobanana__edit_image'. Set preview=false --count=1. Input file: {ref_path}. PROMPT: {load_template_prompt(args[1])}", yolo=True)
     await status.delete()
-    if result.status == "SUCCESS":
-        await finalize_nanobanana_output(chat_id, result.data, message)
-    else:
-        await safe_send_message(message, f"❌ 失败: {result.errors}")
+    if result.status == "SUCCESS": await finalize_nanobanana_output(chat_id, result.data, message)
+    else: await safe_send_message(message, f"❌ 失败: {result.errors}")
 
 @dp.message(Command("vertex"))
 async def cmd_vertex(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    try:
-        args = shlex.split(message.text.replace("/vertex", "").strip())
-    except ValueError:
-        await message.answer("❌ 参数解析失败。")
-        return
+    try: args = shlex.split(message.text.replace("/vertex", "").strip())
+    except: await message.answer("❌ 参数解析失败。"); return
     if not args: return
-    chat_id = str(message.chat.id)
-    status = await message.answer("🎨 正在启动 Vertex AI 生图...")
+    chat_id = str(message.chat.id); status = await message.answer("🎨 正在启动 Vertex AI...")
     agent = registry.get_agent("vertex_generator")
     result = await agent.execute(chat_id, prompt_or_template=args[0]) if len(args) == 1 else await agent.execute(chat_id, reference_image=args[0], prompt_or_template=args[1])
     await status.delete()
-    if result.status == "SUCCESS":
-        await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
-    else:
-        await safe_send_message(message, f"❌ 失败: {result.errors}")
+    if result.status == "SUCCESS": await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
+    else: await safe_send_message(message, f"❌ 失败: {result.errors}")
 
 @dp.message(Command("modelscope"))
 async def cmd_modelscope(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    try:
-        args = shlex.split(message.text.replace("/modelscope", "").strip())
-    except ValueError:
-        await message.answer("❌ 参数解析失败。")
-        return
+    try: args = shlex.split(message.text.replace("/modelscope", "").strip())
+    except: await message.answer("❌ 参数解析失败。"); return
     if len(args) < 2: return
-    chat_id = str(message.chat.id)
-    status = await message.answer("🎨 正在启动 ModelScope 生图...")
+    chat_id = str(message.chat.id); status = await message.answer("🎨 正在启动 ModelScope...")
     agent = registry.get_agent("modelscope_generator")
     result = await agent.execute(chat_id, reference_image=args[0], prompt_or_template=args[1])
     await status.delete()
-    if result.status == "SUCCESS":
-        await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
-    else:
-        await safe_send_message(message, f"❌ 失败: {result.errors}")
+    if result.status == "SUCCESS": await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
+    else: await safe_send_message(message, f"❌ 失败: {result.errors}")
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
     if not await is_allowed(message.from_user.id): return
     chat_id = str(message.chat.id)
     try:
-        photo = message.photo[-1]
-        file_info = await bot.get_file(photo.file_id)
-        upload_dir = "/etc/myapp/genie/uploads"
-        os.makedirs(upload_dir, exist_ok=True)
-        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_path = os.path.join(upload_dir, f"up_{date_str}_{chat_id}.jpg")
-        await bot.download_file(file_info.file_path, file_path)
-        await message.reply(f"📸 图片已落地：`{file_path}`", parse_mode="Markdown")
+        photo = message.photo[-1]; file_info = await bot.get_file(photo.file_id)
+        upload_dir = "/etc/myapp/genie/uploads"; os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f"up_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}.jpg")
+        await bot.download_file(file_info.file_path, file_path); await message.reply(f"📸 图片已落地：`{file_path}`", parse_mode="Markdown")
         await redis_mgr.set_state(chat_id, {"last_image_path": file_path})
-    except Exception as e:
-        logger.error(f"Photo error: {e}")
+    except Exception as e: logger.error(f"Photo error: {e}")
 
 @dp.message(F.text)
 async def handle_message(message: types.Message, forced_input: str = None):
     if not await is_allowed(message.from_user.id): return
-    chat_id = str(message.chat.id)
-    user_input = forced_input if forced_input else message.text
-
-    all_tools = registry.agents
-    filtered_tools_list = list(all_tools.values())
-    force_tool_for_first_round = None
-    is_video_task = False
-    is_image_task = False
+    chat_id = str(message.chat.id); user_input = forced_input if forced_input else message.text
+    all_tools = registry.agents; filtered_tools_list = list(all_tools.values())
+    force_tool_for_first_round = None; is_video_task = False; is_image_task = False; is_report_task = False
 
     if "x.com" in user_input.lower() or "twitter.com" in user_input.lower():
         if any(kw in user_input.lower() for kw in ["下载", "download", "保存", "save", "视频", "video", "媒体"]):
             current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'gemini_cli_executor' with yolo=True. Prompt: 'Use video-downloader skill to download from {user_input}'."
             filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["gemini_cli_executor", "file_sender"]]
-            force_tool_for_first_round = "gemini_cli_executor"
-            is_video_task = True
+            force_tool_for_first_round = "gemini_cli_executor"; is_video_task = True
         else:
             current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'gemini_cli_executor' with yolo=True. Prompt: 'Use x-tweet-fetcher skill to fetch from {user_input}'."
             filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["gemini_cli_executor", "file_sender"]]
             force_tool_for_first_round = "gemini_cli_executor"
     elif "nanobanana" in user_input.lower():
-        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'gemini_cli_executor' with yolo=True. Prompt: 'Use the nanobanana extension. If there is a reference image, use nanobanana__edit_image with preview=false. If text only, use nanobanana__generate_image with preview=false and outputCount=1. Expand template names.'"
+        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'gemini_cli_executor' with yolo=True. Prompt: 'Use the nanobanana extension. If there is a reference image, use nanobanana__edit_image with preview=false --count=1. If text only, use nanobanana__generate_image with preview=false --count=1. Expand template names.'"
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["gemini_cli_executor", "file_sender"]]
-        force_tool_for_first_round = "gemini_cli_executor"
-        is_image_task = True
+        force_tool_for_first_round = "gemini_cli_executor"; is_image_task = True
     elif "vertex" in user_input.lower():
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'vertex_generator' immediately to process this image generation request."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["vertex_generator", "file_sender"]]
-        force_tool_for_first_round = "vertex_generator"
-        is_image_task = True
+        force_tool_for_first_round = "vertex_generator"; is_image_task = True
     elif "modelscope" in user_input.lower():
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'modelscope_generator' immediately to process this image generation request."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["modelscope_generator", "file_sender"]]
-        force_tool_for_first_round = "modelscope_generator"
-        is_image_task = True
-    else:
-        current_input = user_input
+        force_tool_for_first_round = "modelscope_generator"; is_image_task = True
+    elif any(kw in user_input.lower() for kw in ["财经", "finance", "快报", "监控"]):
+        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'finance_monitor' immediately to gather and analyze financial news."
+        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
+        force_tool_for_first_round = "finance_monitor"; is_report_task = True
+    else: current_input = user_input
 
     available_tools = [agent.get_tool_declaration() for agent in filtered_tools_list]
-    max_iterations = 5
-    status_msg = None
+    max_iterations = 5; status_msg = None
 
     for i in range(max_iterations):
-        history = await redis_mgr.get_history(chat_id)
-        summary = await redis_mgr.get_summary(chat_id)
-        state = await redis_mgr.get_state(chat_id)
+        history = await redis_mgr.get_history(chat_id); summary = await redis_mgr.get_summary(chat_id); state = await redis_mgr.get_state(chat_id)
         loop_input = f"ROOT GOAL: {user_input}\nCURRENT STEP INPUT: {current_input}"
-        if state.get("last_image_path"):
-            loop_input += f"\n[Available Image Context]: {state['last_image_path']}"
-
-        if i == 0:
-            status_msg = await message.answer("🔍 正在处理任务...")
-        else:
-            await status_msg.edit_text(f"⏳ 正在执行第 {i} 轮自动化...")
+        if state.get("last_image_path"): loop_input += f"\n[Available Image Context]: {state['last_image_path']}"
+        if i == 0: status_msg = await message.answer("🔍 正在处理任务...")
+        else: await status_msg.edit_text(f"⏳ 正在执行第 {i} 轮自动化...")
 
         try:
             loop = asyncio.get_event_loop()
             force_tool = force_tool_for_first_round if i == 0 else None
-            response = await loop.run_in_executor(None, lambda: orchestrator.chat(
-                loop_input, history, summary=summary, tools=available_tools, force_tool_name=force_tool
-            ))
+            response = await loop.run_in_executor(None, lambda: orchestrator.chat(loop_input, history, summary=summary, tools=available_tools, force_tool_name=force_tool))
             processed = orchestrator.process_response(response)
 
             if processed["type"] == "text":
@@ -335,24 +290,15 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 await safe_send_message(message, reply_text)
                 await redis_mgr.push_history(chat_id, "user", user_input if i == 0 else f"[System: Step {i} complete]")
                 await redis_mgr.push_history(chat_id, "model", reply_text)
-                
-                # 任务完成后静默触发复盘
-                if i > 0: # 只有真正执行过 Agent 的对话才值得复盘
-                    asyncio.create_task(registry.get_agent("memory_refiner").execute(chat_id, history=history, session_status="SUCCESS"))
+                if i > 0: asyncio.create_task(registry.get_agent("memory_refiner").execute(chat_id, history=history, session_status="SUCCESS"))
                 break 
 
             elif processed["type"] == "function_call":
-                agent_name = processed["name"]
-                agent_args = processed["args"]
+                agent_name = processed["name"]; agent_args = processed["args"]
                 await status_msg.edit_text(f"🚀 正在调用: {agent_name}...")
-                if agent_name == "gemini_cli_executor":
-                    agent_args["yolo"] = True
-                
+                if agent_name == "gemini_cli_executor": agent_args["yolo"] = True
                 agent = registry.get_agent(agent_name)
-                if not agent:
-                    current_input = f"Error: Agent {agent_name} not found."
-                    continue
-
+                if not agent: current_input = f"Error: Agent {agent_name} not found."; continue
                 logger.info(f"Executing {agent_name} for {chat_id}")
                 async def heartbeat():
                     count = 0
@@ -368,38 +314,53 @@ async def handle_message(message: types.Message, forced_input: str = None):
                     if "file_path" in result.data:
                         if "nanobanana-output" in result.data["file_path"]:
                             await finalize_nanobanana_output(chat_id, result.data, message)
-                            if is_image_task or is_video_task:
-                                logger.info("Nanobanana output finalized. Terminating loop.")
+                            if is_image_task or is_video_task or is_report_task:
+                                if is_report_task and "report" in result.data:
+                                    await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
+                                logger.info("Nanobanana/Report finalized. Terminating loop.")
                                 await message.answer("✅ 任务执行完毕。"); break
                         else:
-                            await message.answer(f"📦 阶段成果：`{result.data['file_path']}`", parse_mode="Markdown")
+                            # 默认先发文件（保留存档）
                             await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
-                            if is_image_task or is_video_task:
-                                logger.info("File sent. Terminating loop.")
+                            
+                            # 核心改进：如果是报告任务，直接把内容发到聊天窗口
+                            if is_report_task and "report" in result.data:
+                                await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
+                            
+                            if is_image_task or is_video_task or is_report_task:
+                                logger.info("File/Report sent. Terminating loop.")
                                 await message.answer("✅ 任务执行完毕。"); break
-                    current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"
-                    await redis_mgr.set_state(chat_id, result.data)
-                else:
-                    current_input = f"Tool {agent_name} FAILED: {result.errors}"
+                    current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"; await redis_mgr.set_state(chat_id, result.data)
+                else: current_input = f"Tool {agent_name} FAILED: {result.errors}"
                 continue
-        except Exception as e:
-            logger.error(f"Loop error: {e}", exc_info=True)
-            await message.answer("❌ Orchestration Error."); break
+        except Exception as e: logger.error(f"Loop error: {e}", exc_info=True); await message.answer("❌ Orchestration Error."); break
 
 async def cleanup_hanging_processes():
     try:
         import psutil
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-            cmd = " ".join(proc.info['cmdline'] or [])
-            if 'gemini' in cmd and '-p' in cmd:
-                proc.kill()
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+            try:
+                cmd = " ".join(proc.info['cmdline'] or [])
+                name = proc.info['name'].lower()
+                # 1. 清理残留的 gemini-cli
+                if 'gemini' in cmd and '-p' in cmd:
+                    proc.kill()
+                # 2. 清理残留的浏览器进程 (针对 nodriver/camoufox)
+                # 极其重要：避开 Chrome Remote Desktop 和 Chromoting 进程
+                if any(b_name in name for b_name in ['firefox', 'chrome', 'chromium', 'chromedriver']):
+                    if any(exclude in cmd.lower() for exclude in ['chrome-remote-desktop', 'chromoting']):
+                        continue
+                    
+                    # 如果进程运行超过 30 分钟，强制清理
+                    import time
+                    if (time.time() - proc.info['create_time']) > 1800:
+                        proc.kill()
+            except: continue
     except: pass
 
 async def main():
-    await cleanup_hanging_processes()
-    logger.info("Starting GenieBot...")
-    scheduler_mgr.start()
-    await dp.start_polling(bot)
+    await cleanup_hanging_processes(); logger.info("Starting GenieBot..."); scheduler_mgr.start(); await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())

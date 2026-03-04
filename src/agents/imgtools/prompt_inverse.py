@@ -17,7 +17,7 @@ class PromptInverseAgent(BaseAgent):
     description = "Analyzes an image and generates a structured JSON prompt to recreate it. Includes details on subject, clothing, environment, style, etc."
     input_schema = PromptInverseInput
     
-    DOWNLOAD_DIR = "/etc/myapp/genie/downloads"
+    DOWNLOAD_DIR = "/etc/myapp/genie/downloads/prompts"
 
     def __init__(self, orchestrator=None):
         super().__init__()

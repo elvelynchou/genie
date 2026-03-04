@@ -15,7 +15,7 @@ class TrendAnalyzerAgent(BaseAgent):
     description = "Analyzes raw trend data (GitHub, X, etc.) and generates structured insights."
     input_schema = TrendAnalyzerInput
     
-    DOWNLOAD_DIR = "/etc/myapp/genie/downloads"
+    DOWNLOAD_DIR = "/etc/myapp/genie/downloads/analysis"
 
     def __init__(self, orchestrator=None):
         super().__init__()

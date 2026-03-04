@@ -89,11 +89,11 @@ class BrowserAgent(BaseAgent):
         try:
             from camoufox.async_api import AsyncCamoufox
             
-            # Camoufox handles most fingerprinting internally via BrowserForge integration
+            # AsyncCamoufox launch doesn't take user_data_dir directly in most versions
+            # If persistence is needed, it's usually handled via context params, 
+            # but for stealth news scraping, a fresh context is often better.
             async with AsyncCamoufox(
-                user_data_dir=profile_path,
                 headless=params.headless,
-                # Additional camoufox config can be added here
             ) as browser:
                 page = await browser.new_page()
                 # Wrap camoufox page to match nodriver-like interface for _execute_actions
@@ -196,8 +196,20 @@ class BrowserAgent(BaseAgent):
                 if not url: raise ValueError("goto requires url")
                 await page.goto(url)
             elif action == "extract_semantic":
-                tree = await page.accessibility.snapshot()
-                results.append({"type": "semantic_tree", "data": tree})
+                # Fallback to innerText extraction if accessibility tree is unavailable
+                try:
+                    # In some Playwright versions/wrappers, accessibility might be a property or method
+                    if hasattr(page, 'accessibility'):
+                        tree = await page.accessibility.snapshot()
+                        results.append({"type": "semantic_tree", "data": tree})
+                    else:
+                        # Direct DOM text extraction
+                        text = await page.evaluate("() => document.body.innerText")
+                        results.append({"type": "page_text", "data": text})
+                except Exception as e:
+                    self.logger.warning(f"Semantic extraction failed, using innerText: {e}")
+                    text = await page.evaluate("() => document.body.innerText")
+                    results.append({"type": "page_text", "data": text})
             elif action == "click":
                 selector = effective_params.get("selector")
                 text = effective_params.get("text")

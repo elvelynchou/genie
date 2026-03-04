@@ -19,7 +19,7 @@ class LinkContentAgent(BaseAgent):
     description = "Extracts main content from standard webpages and converts it to clean Markdown. DO NOT use this tool for X (Twitter), Weibo, or YouTube links; use specialized fetchers instead."
     input_schema = LinkExtractorInput
     
-    DOWNLOAD_DIR = "/etc/myapp/genie/downloads"
+    DOWNLOAD_DIR = "/etc/myapp/genie/downloads/web"
 
     async def run(self, params: LinkExtractorInput, chat_id: str) -> AgentResult:
         self.logger.info(f"Extracting content from {params.url} for {chat_id}")
