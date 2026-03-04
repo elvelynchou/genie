@@ -1,0 +1,21 @@
+{
+  "template_metadata": {
+    "name": "victorian_elegance",
+    "created_at": "2026-03-03T16:44:56.213451",
+    "chat_id": "550914711"
+  },
+  "core_instructions": "Strictly maintain the facial structure, brunette hair color, and elegant demeanor of the subject. The light blue satin Victorian gown and the 19th-century academic oil painting style must remain consistent.",
+  "visual_details": {
+    "posing": "The woman is reclining elegantly on a luxurious chaise longue, her body angled in a three-quarter view while her head is turned in profile. Her arms rest gracefully across the plush cushions.",
+    "lighting": "Soft, natural indoor lighting that creates a luminous glow on her skin and emphasizes the reflective, lustrous texture of the satin dress with bright highlights and gentle shadows.",
+    "environment": "An opulent 19th-century drawing room with an ornate gold-gilded chaise longue upholstered in tufted cream fabric. The background includes wood-paneled walls, framed classical oil paintings, and decorative golden objects.",
+    "clothing": "An exquisite, shimmering light blue satin Victorian-era gown featuring an off-the-shoulder neckline with delicate white ruffles, puffed short sleeves, a cinched corseted bodice, and a voluminous flowing skirt that catches the light.",
+    "subject": "A young, elegant woman with fair skin and a refined demeanor.",
+    "hair": "The hair color, length, style, and texture must match the reference image exactly.",
+    "accessories": "Ornate gold bracelets on both wrists, gold drop earrings, and a decorative ribbon woven into her hair.",
+    "camera": "A medium-full shot at eye level, capturing the subject from the head to the lap, emphasizing the grandeur of the setting and the detail of her attire.",
+    "style": "Classic 19th-century academic oil painting, reminiscent of the works of Franz Xaver Winterhalter, featuring rich textures, realistic detail, and a romanticized aesthetic.",
+    "face": "The face, facial structure, features, skin tone, and expression must match the reference image exactly."
+  },
+  "usage_hint": "Pass this template to any image generator agent with an image reference."
+}

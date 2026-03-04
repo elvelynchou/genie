@@ -1,0 +1,21 @@
+{
+  "template_metadata": {
+    "name": "fairytale_princess_ballgown",
+    "created_at": "2026-03-03T15:14:35.326693",
+    "chat_id": "550914711"
+  },
+  "core_instructions": "Maintain the exact facial features, porcelain skin tone, ash blonde hair color, and elegant profile of the woman in the reference image. The identity must remain consistent across all generations, preserving her specific aristocratic and serene expression.",
+  "visual_details": {
+    "subject": "A young, elegant woman with a graceful and aristocratic appearance, resembling a fairytale princess.",
+    "clothing": "An ornate, voluminous ball gown featuring an off-the-shoulder gold bodice heavily embellished with sequins and glitter. The dress has large, ruffled white sleeves and a multi-layered, flowing skirt in gradients of soft pink, pale yellow, and cream, shimmering with embedded sparkles and light-catching textures.",
+    "hair": "The hair color, length, style, and texture must match the reference image exactly.",
+    "style": "A romantic, high-fantasy digital painting with influences from Rococo and Baroque aesthetics. The art style is soft, luminous, and highly detailed, focusing on light, texture, and an enchanting, fairytale-like mood.",
+    "environment": "A grand, ethereal palace interior with white marble walls, ornate classical moldings, and intricate architectural carvings. The setting is dreamlike and slightly out of focus, suggesting a majestic ballroom or hall.",
+    "camera": "A medium-full shot taken from a slightly low angle to emphasize the grandeur of the dress. The focus is sharp on the subject with a soft-focus background creating a shallow depth of field.",
+    "lighting": "Soft, diffused, and ethereal lighting that creates a luminous glow. Bright, star-like glimmers and sparkles are scattered across the dress and throughout the scene, enhancing the magical atmosphere.",
+    "posing": "The woman is captured from a rear-three-quarter view, looking back over her shoulder. She is gracefully ascending or standing on a grand staircase, with one hand elegantly lifting the fabric of her expansive skirt, creating a sense of movement.",
+    "accessories": "Dangling gold earrings with a classic design and a delicate gold necklace. Tiny, sparkling ornaments are scattered through the hair.",
+    "face": "The face, facial structure, features, skin tone, and expression must match the reference image exactly."
+  },
+  "usage_hint": "Pass this template to any image generator agent with an image reference."
+}

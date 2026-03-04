@@ -10,7 +10,7 @@ class TemplateCreatorInput(BaseModel):
     template_name: str = Field(..., description="The unique name for the new template (e.g., 'cinematic_me').")
     structured_prompt: Dict[str, Any] = Field(..., description="The JSON object received from prompt_inverse.")
     identity_lock_prompt: str = Field(
-        "Use the uploaded picture as a reference (Strict identity lock, the face must match the attached reference photo exactly, preserving facial structure, skin tone, expression, and hairstyle (same haircut and hair texture)",
+        "Use the uploaded picture as a reference (Strict identity lock, the face must match the attached reference photo exactly, preserving facial structure, skin tone, expression, and hairstyle (same haircut and hair texture)) to create an ultra-realistic cinematic portrait of me.",
         description="The strict instruction for maintaining identity."
     )
 
@@ -35,17 +35,23 @@ class TemplateCreatorAgent(BaseAgent):
             visual_details["face"] = "The face, facial structure, features, skin tone, and expression must match the reference image exactly."
             visual_details["hair"] = "The hair color, length, style, and texture must match the reference image exactly."
 
+            # Ensure the core_instructions contains the user's required mandatory text
+            mandatory_instr = "Use the uploaded picture as a reference (Strict identity lock, the face must match the attached reference photo exactly, preserving facial structure, skin tone, expression, and hairstyle (same haircut and hair texture))"
+            
+            core_instr = params.identity_lock_prompt
+            if mandatory_instr not in core_instr:
+                core_instr = mandatory_instr + " " + core_instr
+
             # 1. Merge logic
-            # We wrap the visual details and add the core generation instructions
             final_template = {
                 "template_metadata": {
                     "name": params.template_name,
                     "created_at": datetime.now().isoformat(),
                     "chat_id": chat_id
                 },
-                "core_instructions": params.identity_lock_prompt,
+                "core_instructions": core_instr,
                 "visual_details": visual_details,
-                "usage_hint": f"Pass this template to any image generator agent with an image reference."
+                "usage_hint": "Pass this template to any image generator agent with an image reference."
             }
 
             # 2. Save to disk

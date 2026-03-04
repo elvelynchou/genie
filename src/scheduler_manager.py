@@ -40,7 +40,7 @@ class SchedulerManager:
         ]
 
         extractor = registry.get_agent("link_content_extractor")
-        analyzer = registry.get_agent("github_analyzer")
+        analyzer = registry.get_agent("trend_analyzer")
         file_sender = registry.get_agent("file_sender")
         
         combined_text = ""
