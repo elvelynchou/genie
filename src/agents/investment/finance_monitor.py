@@ -118,24 +118,28 @@ class FinanceMonitorAgent(BaseAgent):
         if not digest_payload:
             return AgentResult(status="SUCCESS", message="No new content found across all sources.")
 
+        # 获取上一次的报告内容以进行对比（减少冗余）
+        last_report = self.redis_mgr.client.get(f"last_finance_digest:{chat_id}")
+        last_report_text = last_report.decode('utf-8') if last_report else "无上期报告。"
+
         # 7. Generate Final Digest (Research Report) - Strict filtering
         analysis_prompt = f"""
         你是一个专业的财经研究员。请对比分析以下最新的多个来源的情报汇总。
         
-        【重要准则】：
-        - 极度精简：剔除所有与之前重复的旧闻（假设用户已经看过半小时前的报告）。
-        - 增量报告：仅报告“新发生的事件”或“已有事件的重大转折/加重”。
-        - 突发优先：必须优先突出并深入分析“突发事件（Breaking News）”。
-        
-        情报汇总内容：
+        【参考背景：上期报告摘要】（请勿在此基础上重复）：
+        {last_report_text[:2000]}
+
+        【本期最新情报内容】：
         {digest_payload[:10000]}
         
         要求输出：
-        1. 🚨 突发/转折事件深度解析。
-        2. 跨市场（股市、商品、币圈）的最新影响评估。
-        3. 2-3 条基于“新变动”的 Research 或交易建议。
+        1. 🚨 **新增/转折事件**：仅报告自上期以来新出现的事件或已有事件的重大转折。
+        2. **增量影响评估**：这些新动态对市场产生的最新边际影响。
+        3. 1-2 条具体的最新交易建议。
         
-        如果没有显著的新变动，请仅回复：今日市场暂无重大新变动。
+        【重要准则】：
+        - **严禁重复**：如果某条新闻在上期已经出现且没有新进展，请彻底忽略。
+        - **极度精简**：如果没有重大的新变动，请仅回复：今日市场暂无重大新变动。
         
         语言：中文。格式：Markdown。
         """
@@ -143,6 +147,12 @@ class FinanceMonitorAgent(BaseAgent):
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(None, lambda: self.orchestrator.chat(analysis_prompt, []))
         digest_text = self.orchestrator.process_response(response).get("content", "Analysis failed.")
+
+        if "暂无重大新变动" in digest_text:
+            return AgentResult(status="SUCCESS", message="No significant new changes to report.")
+
+        # 更新 Redis 中的上期报告快照
+        self.redis_mgr.client.set(f"last_finance_digest:{chat_id}", digest_text)
 
         os.makedirs(self.FINANCE_DIR, exist_ok=True)
         digest_path = os.path.join(self.FINANCE_DIR, f"Research_Report_{date_str}.md")

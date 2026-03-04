@@ -1,0 +1,21 @@
+{
+  "template_metadata": {
+    "name": "pilates_fitness_rear_view",
+    "created_at": "2026-03-04T10:57:30.516299",
+    "chat_id": "550914711"
+  },
+  "core_instructions": "Use the uploaded picture as a reference (Strict identity lock, the face must match the attached reference photo exactly, preserving facial structure, skin tone, expression, and hairstyle (same haircut and hair texture)) Maintain the exact athletic build, the specific length and texture of the long dark hair, and the white athletic outfit. The subject must always be viewed from behind or in a way that obscures the face to maintain the aesthetic of the original reference.",
+  "visual_details": {
+    "posing": "Kneeling on a Pilates reformer machine, facing away, hands resting on the footbar, back straight",
+    "environment": "Indoor fitness studio or home gym with a Pilates reformer, light green curtains, sheer white curtains, light-colored wood flooring, and a dark grey workout mat",
+    "lighting": "Bright, soft, diffused indoor lighting with a natural feel",
+    "subject": "A woman with a fit, athletic build viewed from behind",
+    "clothing": "White athletic crop top and tight, high-waisted white yoga leggings",
+    "face": "The face, facial structure, features, skin tone, and expression must match the reference image exactly.",
+    "camera": "Eye-level shot from a rear perspective, centered on the subject, clear focus",
+    "style": "Clean, realistic fitness lifestyle photography",
+    "hair": "The hair color, length, style, and texture must match the reference image exactly.",
+    "accessories": "None visible"
+  },
+  "usage_hint": "Pass this template to any image generator agent with an image reference."
+}
