@@ -268,7 +268,7 @@ async def handle_message(message: types.Message, forced_input: str = None):
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
         force_tool_for_first_round = "finance_monitor"; is_report_task = True
     elif "http" in user_input.lower() and any(kw in user_input.lower() for kw in ["抓取", "fetch", "read", "内容", "浏览器"]):
-        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Use 'stealth_browser' with engine='camoufox' to fetch content. Must use 'extract_semantic' action."
+        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Use 'stealth_browser' with engine='camoufox' to fetch content. You MUST provide a list of actions: 1. {{'action': 'goto', 'params': {{'url': 'THE_URL'}}}}, 2. {{'action': 'wait', 'params': {{'seconds': 5}}}}, 3. {{'action': 'extract_semantic'}}. Replace THE_URL with the actual link."
         # 核心改进：彻底移除 link_content_extractor，防止它作为 fallback 触发死循环
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
@@ -289,6 +289,11 @@ async def handle_message(message: types.Message, forced_input: str = None):
             force_tool = force_tool_for_first_round if i == 0 else None
             response = await loop.run_in_executor(None, lambda: orchestrator.chat(loop_input, history, summary=summary, tools=available_tools, force_tool_name=force_tool))
             processed = orchestrator.process_response(response)
+
+            if processed["type"] == "error":
+                logger.error(f"Orchestrator error: {processed['content']}")
+                await message.answer(f"❌ 调度异常: {processed['content']}")
+                break
 
             if processed["type"] == "text":
                 reply_text = processed["content"]

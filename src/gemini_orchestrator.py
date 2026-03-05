@@ -99,6 +99,11 @@ class GeminiOrchestrator:
             return {"type": "error", "content": "No candidates in response"}
         
         candidate = response.candidates[0]
+        if not candidate.content or not candidate.content.parts:
+            # Handle cases where content is blocked or empty
+            finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
+            return {"type": "error", "content": f"Model returned empty content. Finish reason: {finish_reason}"}
+
         for part in candidate.content.parts:
             if part.text:
                 return {"type": "text", "content": part.text}
