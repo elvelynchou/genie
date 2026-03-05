@@ -36,6 +36,26 @@ class HumanBehavior:
             points.append((x, y))
         return points
 
+    @staticmethod
+    async def human_type(type_func, backspace_func, text: str, error_rate=0.03):
+        """
+        Simulates human typing: variable speed, occasional typos, and backspace corrections.
+        type_func: async function to type a single char.
+        backspace_func: async function to press backspace.
+        """
+        for char in text:
+            # Occasional typo logic
+            if random.random() < error_rate:
+                typo_char = random.choice("abcdefghijklmnopqrstuvwxyz")
+                await type_func(typo_char)
+                await asyncio.sleep(random.uniform(0.2, 0.5)) # Human 'oops' realization
+                await backspace_func()
+                await asyncio.sleep(random.uniform(0.1, 0.3))
+            
+            await type_func(char)
+            # Natural variance in typing speed (faster for common patterns, slower for transitions)
+            await asyncio.sleep(random.uniform(0.05, 0.25))
+
 class BrowserAction(BaseModel):
     action: str = Field(..., description="Action to perform: goto, click, type, scroll, snapshot, wait, hover")
     params: Dict[str, Any] = Field(default_factory=dict, description="Parameters for the action (url, selector, text, etc.)")
@@ -239,10 +259,10 @@ class BrowserAgent(BaseAgent):
                 elem = await page.select(selector)
                 if elem:
                     await elem.focus()
-                    for char in text:
-                        await elem.send_keys(char)
-                        # 模拟人类打字不均匀的节奏
-                        await asyncio.sleep(random.uniform(0.05, 0.25))
+                    # 使用统一的人类打字模拟引擎 (支持拼写错误回删)
+                    async def nodriver_type(c): await elem.send_keys(c)
+                    async def nodriver_backspace(): await elem.send_keys("\b")
+                    await HumanBehavior.human_type(nodriver_type, nodriver_backspace, text)
             elif action == "extract_semantic":
                 try:
                     ax_nodes = await page.send(uc.cdp.accessibility.get_full_ax_tree())
@@ -317,8 +337,10 @@ class BrowserAgent(BaseAgent):
                 text = str(effective_params.get("text", ""))
                 if selector:
                     await page.focus(selector)
-                    for char in text:
-                        await page.keyboard.type(char, delay=random.randint(50, 250))
+                    # 使用统一的人类打字模拟引擎
+                    async def fox_type(c): await page.keyboard.type(c)
+                    async def fox_backspace(): await page.keyboard.press("Backspace")
+                    await HumanBehavior.human_type(fox_type, fox_backspace, text)
             elif action == "extract_semantic":
                 # 进化：为 Camoufox 也增加语义压缩逻辑
                 try:
