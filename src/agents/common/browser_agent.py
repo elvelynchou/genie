@@ -145,6 +145,7 @@ class BrowserAgent(BaseAgent):
                     self.logger.info(f"Extracted semantic tree ({len(compressed_view)} chars)")
                 except Exception as e:
                     self.logger.warning(f"Semantic extraction failed: {e}")
+                    results.append({"type": "error", "data": f"Nodriver semantic failed: {str(e)}"})
             elif action == "snapshot":
                 path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}.png")
                 await page.save_screenshot(path)
@@ -189,12 +190,13 @@ class BrowserAgent(BaseAgent):
                                 const text = el.innerText || el.placeholder || el.value;
                                 if (text && text.length > 5) items.push(`[${el.tagName}] ${text.trim()}`);
                             });
-                            return items.join('\n');
+                            return items.join('\\n');
                         }""")
                     results.append({"type": "semantic_tree", "data": text_content})
                     self.logger.info(f"Extracted semantic content ({len(text_content)} chars)")
                 except Exception as e:
                     self.logger.warning(f"Camoufox semantic failed: {e}")
+                    results.append({"type": "error", "data": f"Semantic extraction failed: {str(e)}"})
             elif action == "snapshot":
                 path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}_fox.png")
                 await page.screenshot(path=path)
