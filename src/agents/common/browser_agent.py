@@ -18,7 +18,7 @@ class BrowserAction(BaseModel):
 class BrowserAgentInput(BaseModel):
     profile: str = Field("default", description="Browser profile name to maintain session/login.")
     actions: List[Dict[str, Any]] = Field(default_factory=list, description="List of browser actions to execute.")
-    headless: bool = Field(False, description="Whether to run in headless mode.")
+    headless: bool = Field(True, description="Whether to run in headless mode.")
     keep_open: bool = Field(False, description="Whether to keep the browser window open (max 15 mins).")
     engine: str = Field("camoufox", description="Automation engine: 'nodriver' (Chromium) or 'camoufox' (Firefox).")
 
