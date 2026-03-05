@@ -5,6 +5,7 @@ import sys
 import json
 import shlex
 import hashlib
+import re
 from datetime import datetime
 
 # Ensure local imports work correctly
@@ -62,7 +63,7 @@ OPERATIONAL DIRECTIVES:
 4. FINANCE PIPELINE: When monitoring finance, the system uses Browser -> Cleaner -> RAG -> Report. 
 5. BROWSER STRATEGY: When using 'stealth_browser' to read a page, you MUST include at least two actions: 1) {"action": "goto", "url": "..."} and 2) {"action": "extract_semantic"}. Without 'extract_semantic', you will receive no data back.
 6. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for X/video, Nanobanana, and Skill tasks.
-7. KNOWLEDGE UTILIZATION: You have access to a Graph-RAG system. Prioritize information labeled [Relevant Past Experiences & Knowledge] to maintain continuity and honor user preferences.
+7. KNOWLEDGE UTILIZATION: You have access to a Graph-RAG system. Prioritize information labeled [Relevant Past Experiences & Knowledge] to answer queries. ONLY use 'stealth_browser' to search the web if the information in memory is insufficient, or if the user explicitly asks for "latest web search".
 """
 orchestrator = GeminiOrchestrator(api_key=GEMINI_KEY, system_instruction=system_instruction)
 
@@ -265,19 +266,14 @@ async def handle_message(message: types.Message, forced_input: str = None):
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["modelscope_generator", "file_sender"]]
         force_tool_for_first_round = "modelscope_generator"; is_image_task = True
     elif any(kw in user_input.lower() for kw in ["监控", "获取", "最新", "快报", "monitor", "gather"]) and any(f_kw in user_input.lower() for f_kw in ["财经", "finance"]):
-        # 仅在用户明确要求“获取/监控”时才触发抓取任务
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'finance_monitor' immediately to gather and analyze financial news."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
         force_tool_for_first_round = "finance_monitor"; is_report_task = True
     elif "http" in user_input.lower() and any(kw in user_input.lower() for kw in ["抓取", "fetch", "read", "内容", "浏览器"]):
-        # 获取 URL 并注入到更直观的指令中
         import re
         url_match = re.search(r'https?://[^\s]+', user_input)
         target_url = url_match.group(0) if url_match else "THE_LINK_IN_USER_REQUEST"
-        
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='camoufox'. You MUST include these 3 actions in the 'actions' parameter: 1. goto {target_url}, 2. wait for 5 seconds, 3. extract_semantic. This is mandatory to see the page text."
-        
-        # 核心改进：彻底移除 link_content_extractor，防止它作为 fallback 触发死循环
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
     else: current_input = user_input
@@ -293,25 +289,18 @@ async def handle_message(message: types.Message, forced_input: str = None):
         if i == 0:
             try:
                 loop = asyncio.get_event_loop()
-                # 1. Graph Hop: Extract entities and find exact matches
                 entities = await loop.run_in_executor(None, lambda: orchestrator.extract_entities(user_input))
                 graph_results = await redis_mgr.search_by_entities(entities) if entities else []
-                
-                # 2. Vector Search: Find semantic matches
                 vector = await loop.run_in_executor(None, lambda: orchestrator.get_embedding(user_input))
                 vector_results = await redis_mgr.search_vector(vector) if vector else []
-                
-                # 合并去重
                 combined_rag = list(set(graph_results + vector_results))
                 if combined_rag:
                     rag_context = "\n".join([f"- {res}" for e, res in enumerate(combined_rag)])
-                    logger.info(f"RAG Context loaded: {len(combined_rag)} snippets found via Graph/Vector.")
-            except Exception as e:
-                logger.error(f"RAG retrieval failed: {e}")
+                    logger.info(f"RAG Context loaded: {len(combined_rag)} snippets found.")
+            except Exception as e: logger.error(f"RAG failed: {e}")
 
         loop_input = f"ROOT GOAL: {user_input}\nCURRENT STEP INPUT: {current_input}"
-        if rag_context:
-            loop_input += f"\n[Relevant Past Experiences & Knowledge]:\n{rag_context}"
+        if rag_context: loop_input += f"\n[Relevant Past Experiences & Knowledge]:\n{rag_context}"
         if state.get("last_image_path"): loop_input += f"\n[Available Image Context]: {state['last_image_path']}"
         
         if i == 0: status_msg = await message.answer("🔍 正在处理任务...")
@@ -325,8 +314,7 @@ async def handle_message(message: types.Message, forced_input: str = None):
 
             if processed["type"] == "error":
                 logger.error(f"Orchestrator error: {processed['content']}")
-                await message.answer(f"❌ 调度异常: {processed['content']}")
-                break
+                await message.answer(f"❌ 调度异常: {processed['content']}"); break
 
             if processed["type"] == "text":
                 reply_text = processed["content"]
@@ -339,6 +327,15 @@ async def handle_message(message: types.Message, forced_input: str = None):
 
             elif processed["type"] == "function_call":
                 agent_name = processed["name"]; agent_args = processed["args"]
+                
+                # 修复逻辑：过滤掉 agent_args 中的 None 动作并尝试修复
+                if agent_name == "stealth_browser" and "actions" in agent_args:
+                    agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
+                    if not agent_args["actions"]:
+                        url_search = re.search(r'https?://[^\s]+', user_input)
+                        url = agent_args.get("url") or (url_search.group(0) if url_search else None)
+                        if url: agent_args["actions"] = [{"action": "goto", "params": {"url": url}}, {"action": "wait", "params": {"seconds": 5}}, {"action": "extract_semantic"}]
+
                 await status_msg.edit_text(f"🚀 正在调用: {agent_name}...")
                 if agent_name == "gemini_cli_executor": agent_args["yolo"] = True
                 agent = registry.get_agent(agent_name)
@@ -359,35 +356,20 @@ async def handle_message(message: types.Message, forced_input: str = None):
                         if "nanobanana-output" in result.data["file_path"]:
                             await finalize_nanobanana_output(chat_id, result.data, message)
                             if is_image_task or is_video_task or is_report_task or is_browse_task:
-                                if is_report_task and "report" in result.data:
-                                    await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
-                                logger.info("Nanobanana/Report/Browse finalized. Terminating loop.")
-                                await message.answer("✅ 任务执行完毕。"); break
+                                if is_report_task and "report" in result.data: await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
+                                logger.info("Nanobanana/Report/Browse finalized."); await message.answer("✅ 任务执行完毕。"); break
                         else:
                             await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
-                            if is_report_task and "report" in result.data:
-                                await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
+                            if is_report_task and "report" in result.data: await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
                             if is_image_task or is_video_task or is_report_task or is_browse_task:
-                                logger.info("File/Report/Browse sent. Terminating loop.")
-                                await message.answer("✅ 任务执行完毕。"); break
+                                logger.info("File/Report/Browse sent."); await message.answer("✅ 任务执行完毕。"); break
                     
-                    # 针对抓取任务，提供清洗后的纯文本，并清空工具箱强制总结
                     if is_browse_task:
                         extracted = result.data.get("page_content", "")
-                        if not extracted and "results" in result.data:
-                            # 最后的尝试：手动从列表提取
-                            for r in result.data["results"]:
-                                if r.get("data"): extracted = str(r["data"]); break
-
-                        if extracted:
-                            current_input = f"Tool {agent_name} SUCCESS. HERE IS THE WEB CONTENT:\n\n{extracted[:5000]}\n\nNOW SUMMARIZE THIS TO THE USER IMMEDIATELY. DO NOT CALL ANY MORE TOOLS."
-                        else:
-                            current_input = f"Tool {agent_name} SUCCESS but content was surprisingly empty. Tell the user you couldn't find readable text on this specific page."
-
+                        if extracted: current_input = f"Tool {agent_name} SUCCESS. HERE IS THE WEB CONTENT:\n\n{extracted[:5000]}\n\nNOW SUMMARIZE THIS TO THE USER IMMEDIATELY. DO NOT CALL ANY MORE TOOLS."
+                        else: current_input = f"Tool {agent_name} SUCCESS but content empty. Inform the user."
                         available_tools = [] 
-                    else:
-                        current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"
-                    
+                    else: current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"
                     await redis_mgr.set_state(chat_id, result.data)
                 else: current_input = f"Tool {agent_name} FAILED: {result.errors}"
                 continue
@@ -396,16 +378,13 @@ async def handle_message(message: types.Message, forced_input: str = None):
 async def cleanup_hanging_processes():
     try:
         import psutil
-        current_pid = os.getpid()
         for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
             try:
-                cmd = " ".join(proc.info['cmdline'] or [])
-                name = proc.info['name'].lower()
+                cmd = " ".join(proc.info['cmdline'] or []); name = proc.info['name'].lower()
                 if 'gemini' in cmd and '-p' in cmd: proc.kill()
                 if any(b_name in name for b_name in ['firefox', 'chrome', 'chromium', 'chromedriver']):
                     if any(exclude in cmd.lower() for exclude in ['chrome-remote-desktop', 'chromoting']): continue
-                    import time
-                    if (time.time() - proc.info['create_time']) > 1800: proc.kill()
+                    if (datetime.now().timestamp() - proc.info['create_time']) > 1800: proc.kill()
             except: continue
     except: pass
 

@@ -95,8 +95,16 @@ class GeminiOrchestrator:
             return current_summary or ""
 
     def extract_entities(self, text: str) -> List[str]:
-        """Extract core entities for Graph-RAG lookup."""
-        prompt = f"Extract a list of core entities (companies, locations, technical terms, specific preferences) from the following text. Output ONLY a comma-separated list of keywords.\n\nText: {text}"
+        """Extract core entities with cross-lingual support (CN/EN alignment)."""
+        prompt = f"""
+        Extract core entities (companies, locations, terms) from the text.
+        CRITICAL: For each entity, provide BOTH its Chinese and English names if possible to enable cross-lingual lookup.
+        Output ONLY a comma-separated list of keywords.
+        Example input: "必和必拓的铁矿石"
+        Example output: "必和必拓, BHP, 铁矿石, Iron Ore"
+        
+        Text: {text}
+        """
         try:
             response = self.client.models.generate_content(
                 model=self.model_name,
@@ -104,7 +112,9 @@ class GeminiOrchestrator:
             )
             raw = response.text.strip()
             if not raw or "NONE" in raw.upper(): return []
-            return [e.strip() for e in raw.split(",") if e.strip()]
+            # Split and clean
+            entities = [e.strip() for e in raw.split(",") if e.strip()]
+            return list(set(entities)) # Deduplicate
         except Exception as e:
             self.logger.error(f"Entity extraction error: {e}")
             return []
