@@ -240,7 +240,7 @@ async def handle_message(message: types.Message, forced_input: str = None):
     if not await is_allowed(message.from_user.id): return
     chat_id = str(message.chat.id); user_input = forced_input if forced_input else message.text
     all_tools = registry.agents; filtered_tools_list = list(all_tools.values())
-    force_tool_for_first_round = None; is_video_task = False; is_image_task = False; is_report_task = False
+    force_tool_for_first_round = None; is_video_task = False; is_image_task = False; is_report_task = False; is_browse_task = False
 
     if "x.com" in user_input.lower() or "twitter.com" in user_input.lower():
         if any(kw in user_input.lower() for kw in ["下载", "download", "保存", "save", "视频", "video", "媒体"]):
@@ -267,6 +267,10 @@ async def handle_message(message: types.Message, forced_input: str = None):
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'finance_monitor' immediately to gather and analyze financial news."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
         force_tool_for_first_round = "finance_monitor"; is_report_task = True
+    elif "http" in user_input.lower() and any(kw in user_input.lower() for kw in ["抓取", "fetch", "read", "内容", "浏览器"]):
+        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Use 'stealth_browser' with engine='camoufox' to fetch content from the URL. Must use 'extract_semantic' action."
+        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "link_content_extractor", "file_sender"]]
+        force_tool_for_first_round = "stealth_browser"; is_browse_task = True
     else: current_input = user_input
 
     available_tools = [agent.get_tool_declaration() for agent in filtered_tools_list]
@@ -315,23 +319,27 @@ async def handle_message(message: types.Message, forced_input: str = None):
                     if "file_path" in result.data:
                         if "nanobanana-output" in result.data["file_path"]:
                             await finalize_nanobanana_output(chat_id, result.data, message)
-                            if is_image_task or is_video_task or is_report_task:
+                            if is_image_task or is_video_task or is_report_task or is_browse_task:
                                 if is_report_task and "report" in result.data:
                                     await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
-                                logger.info("Nanobanana/Report finalized. Terminating loop.")
+                                logger.info("Nanobanana/Report/Browse finalized. Terminating loop.")
                                 await message.answer("✅ 任务执行完毕。"); break
                         else:
-                            # 默认先发文件（保留存档）
                             await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
-                            
-                            # 核心改进：如果是报告任务，直接把内容发到聊天窗口
                             if is_report_task and "report" in result.data:
                                 await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
-                            
-                            if is_image_task or is_video_task or is_report_task:
-                                logger.info("File/Report sent. Terminating loop.")
+                            if is_image_task or is_video_task or is_report_task or is_browse_task:
+                                logger.info("File/Report/Browse sent. Terminating loop.")
                                 await message.answer("✅ 任务执行完毕。"); break
-                    current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"; await redis_mgr.set_state(chat_id, result.data)
+                    
+                    # 针对没有文件返回但成功的抓取任务，强制终止
+                    if is_browse_task:
+                        current_input = f"Tool {agent_name} SUCCESS. Content obtained: {json.dumps(result.data)[:2000]}. NOW PLEASE PROVIDE THE FINAL SUMMARY TO THE USER."
+                        # 这里不直接 break，让下一轮输出总结文本
+                    else:
+                        current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"; 
+                    
+                    await redis_mgr.set_state(chat_id, result.data)
                 else: current_input = f"Tool {agent_name} FAILED: {result.errors}"
                 continue
         except Exception as e: logger.error(f"Loop error: {e}", exc_info=True); await message.answer("❌ Orchestration Error."); break
@@ -344,19 +352,11 @@ async def cleanup_hanging_processes():
             try:
                 cmd = " ".join(proc.info['cmdline'] or [])
                 name = proc.info['name'].lower()
-                # 1. 清理残留的 gemini-cli
-                if 'gemini' in cmd and '-p' in cmd:
-                    proc.kill()
-                # 2. 清理残留的浏览器进程 (针对 nodriver/camoufox)
-                # 极其重要：避开 Chrome Remote Desktop 和 Chromoting 进程
+                if 'gemini' in cmd and '-p' in cmd: proc.kill()
                 if any(b_name in name for b_name in ['firefox', 'chrome', 'chromium', 'chromedriver']):
-                    if any(exclude in cmd.lower() for exclude in ['chrome-remote-desktop', 'chromoting']):
-                        continue
-                    
-                    # 如果进程运行超过 30 分钟，强制清理
+                    if any(exclude in cmd.lower() for exclude in ['chrome-remote-desktop', 'chromoting']): continue
                     import time
-                    if (time.time() - proc.info['create_time']) > 1800:
-                        proc.kill()
+                    if (time.time() - proc.info['create_time']) > 1800: proc.kill()
             except: continue
     except: pass
 
