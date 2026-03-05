@@ -331,12 +331,20 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 agent_name = processed["name"]; agent_args = processed["args"]
                 
                 # 修复逻辑：过滤掉 agent_args 中的 None 动作并尝试修复
-                if agent_name == "stealth_browser" and "actions" in agent_args:
-                    agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
-                    if not agent_args["actions"]:
-                        url_search = re.search(r'https?://[^\s]+', user_input)
-                        url = agent_args.get("url") or (url_search.group(0) if url_search else None)
-                        if url: agent_args["actions"] = [{"action": "goto", "params": {"url": url}}, {"action": "wait", "params": {"seconds": 10}}, {"action": "extract_semantic"}]
+                if agent_name == "stealth_browser":
+                    # 1. 强制纠正 Headless 状态
+                    if "headless" in agent_args:
+                        # 如果用户提到了“打开窗口”，强制设为 False
+                        if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "window"]):
+                            agent_args["headless"] = False
+                    
+                    # 2. 修复 Actions
+                    if "actions" in agent_args:
+                        agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
+                        if not agent_args["actions"]:
+                            url_search = re.search(r'https?://[^\s]+', user_input)
+                            url = agent_args.get("url") or (url_search.group(0) if url_search else None)
+                            if url: agent_args["actions"] = [{"action": "goto", "params": {"url": url}}, {"action": "wait", "params": {"seconds": 10}}, {"action": "extract_semantic"}]
 
                 await status_msg.edit_text(f"🚀 正在调用: {agent_name}...")
                 if agent_name == "gemini_cli_executor": agent_args["yolo"] = True
