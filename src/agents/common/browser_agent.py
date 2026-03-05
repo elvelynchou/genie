@@ -20,7 +20,7 @@ class BrowserAgentInput(BaseModel):
     actions: List[Dict[str, Any]] = Field(default_factory=list, description="List of browser actions to execute.")
     headless: bool = Field(False, description="Whether to run in headless mode.")
     keep_open: bool = Field(False, description="Whether to keep the browser window open (max 15 mins).")
-    engine: str = Field("nodriver", description="Automation engine: 'nodriver' (Chromium) or 'camoufox' (Firefox).")
+    engine: str = Field("camoufox", description="Automation engine: 'nodriver' (Chromium) or 'camoufox' (Firefox).")
 
 class BrowserAgent(BaseAgent):
     name = "stealth_browser"
