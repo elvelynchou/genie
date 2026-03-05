@@ -269,13 +269,18 @@ async def handle_message(message: types.Message, forced_input: str = None):
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'finance_monitor' immediately to gather and analyze financial news."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
         force_tool_for_first_round = "finance_monitor"; is_report_task = True
-    elif "http" in user_input.lower() and any(kw in user_input.lower() for kw in ["抓取", "fetch", "read", "内容", "浏览器"]):
+    elif "http" in user_input.lower() or any(kw in user_input.lower() for kw in ["抓取", "浏览器", "browser", "打开窗口"]):
         url_match = re.search(r'https?://[^\s]+', user_input)
-        target_url = url_match.group(0) if url_match else "THE_LINK_IN_USER_REQUEST"
+        target_url = url_match.group(0) if url_match else "about:blank"
+        
         headless_val = "False" if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]) else "True"
+        keep_open_val = "True" if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]) else "False"
+        
         profile_match = re.search(r'使用([\w_]+)profile', user_input.replace(" ", ""))
         target_profile = profile_match.group(1) if profile_match else "default"
-        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='camoufox', headless={headless_val}, and profile='{target_profile}'. You MUST include these 3 actions: 1. goto {target_url}, 2. wait for 10 seconds, 3. extract_semantic."
+        
+        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='camoufox', headless={headless_val}, profile='{target_profile}', and keep_open={keep_open_val}. Actions: 1. goto {target_url}, 2. extract_semantic."
+        
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
     else: current_input = user_input
@@ -333,12 +338,15 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 # 修复逻辑：过滤掉 agent_args 中的 None 动作并尝试修复
                 if agent_name == "stealth_browser":
                     # 1. 强制纠正 Headless 状态
-                    if "headless" in agent_args:
-                        # 如果用户提到了“打开窗口”，强制设为 False
-                        if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "window"]):
-                            agent_args["headless"] = False
+                    if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]):
+                        agent_args["headless"] = False
                     
-                    # 2. 修复 Actions
+                    # 2. 强制纠正 Keep Open 状态
+                    if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]):
+                        agent_args["keep_open"] = True
+                        agent_args["headless"] = False # 保持开启通常意味着需要 GUI 操作
+                    
+                    # 3. 修复 Actions
                     if "actions" in agent_args:
                         agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
                         if not agent_args["actions"]:
