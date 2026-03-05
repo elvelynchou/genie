@@ -10,6 +10,31 @@ from agents.base import BaseAgent, AgentResult
 import nodriver as uc
 from browserforge.fingerprints import FingerprintGenerator
 from browserforge.headers import HeaderGenerator
+import math
+
+class HumanBehavior:
+    """Helper to simulate human-like interactions (Bezier curves, jitter, etc.)"""
+    
+    @staticmethod
+    def generate_bezier_curve(start, end, steps=20):
+        """Generates a cubic Bezier curve with randomized control points."""
+        x1, y1 = start
+        x2, y2 = end
+        
+        # Randomize control points to simulate human 'arc' and overshoot
+        cx1 = x1 + (x2 - x1) * random.uniform(0.1, 0.4) + random.randint(-50, 50)
+        cy1 = y1 + (y2 - y1) * random.uniform(0.1, 0.4) + random.randint(-50, 50)
+        cx2 = x1 + (x2 - x1) * random.uniform(0.6, 0.9) + random.randint(-50, 50)
+        cy2 = y1 + (y2 - y1) * random.uniform(0.6, 0.9) + random.randint(-50, 50)
+        
+        points = []
+        for i in range(steps + 1):
+            t = i / steps
+            # Cubic Bezier formula
+            x = (1-t)**3 * x1 + 3*(1-t)**2 * t * cx1 + 3*(1-t) * t**2 * cx2 + t**3 * x2
+            y = (1-t)**3 * y1 + 3*(1-t)**2 * t * cy1 + 3*(1-t) * t**2 * cy2 + t**3 * y2
+            points.append((x, y))
+        return points
 
 class BrowserAction(BaseModel):
     action: str = Field(..., description="Action to perform: goto, click, type, scroll, snapshot, wait, hover")
@@ -37,6 +62,22 @@ class BrowserAgent(BaseAgent):
         super().__init__()
         self.fingerprint_gen = FingerprintGenerator()
         self.header_gen = HeaderGenerator()
+        self.last_mouse_pos = (0, 0)
+
+    async def _human_mouse_move(self, page, target_x, target_y, engine="camoufox"):
+        """Moves mouse to target using a Bezier curve."""
+        steps = random.randint(15, 30)
+        points = HumanBehavior.generate_bezier_curve(self.last_mouse_pos, (target_x, target_y), steps=steps)
+        
+        for x, y in points:
+            if engine == "camoufox":
+                await page.mouse.move(x, y)
+            else:
+                await page.mouse_move(x, y)
+            # Human-like micro-delay
+            await asyncio.sleep(random.uniform(0.005, 0.015))
+        
+        self.last_mouse_pos = (target_x, target_y)
 
     async def run(self, params: BrowserAgentInput, chat_id: str) -> AgentResult:
         self.logger.info(f"Starting {params.engine} browser for {chat_id} (Profile: {params.profile}, Headless: {params.headless})")
@@ -172,6 +213,36 @@ class BrowserAgent(BaseAgent):
                 url = effective_params.get("url")
                 if not url: raise ValueError(f"Action 'goto' missing 'url' parameter")
                 await page.get(url)
+            elif action == "click" or action == "hover":
+                selector = effective_params.get("selector")
+                text = effective_params.get("text")
+                elem = None
+                if selector:
+                    elem = await page.select(selector)
+                elif text:
+                    elem = await page.find(text, best_match=True)
+                
+                if elem:
+                    # 获取坐标并执行贝塞尔移动
+                    # Note: nodriver elem has attributes for position
+                    x = elem.attributes.get('x', random.randint(100, 500))
+                    y = elem.attributes.get('y', random.randint(100, 500))
+                    await self._human_mouse_move(page, x, y, engine="nodriver")
+                    
+                    if action == "click":
+                        await elem.click()
+                else:
+                    raise ValueError(f"Element not found for {action}")
+            elif action == "type":
+                selector = effective_params.get("selector")
+                text = str(effective_params.get("text", ""))
+                elem = await page.select(selector)
+                if elem:
+                    await elem.focus()
+                    for char in text:
+                        await elem.send_keys(char)
+                        # 模拟人类打字不均匀的节奏
+                        await asyncio.sleep(random.uniform(0.05, 0.25))
             elif action == "extract_semantic":
                 try:
                     ax_nodes = await page.send(uc.cdp.accessibility.get_full_ax_tree())
@@ -217,6 +288,37 @@ class BrowserAgent(BaseAgent):
                 url = effective_params.get("url")
                 if not url: raise ValueError("goto requires url")
                 await page.goto(url)
+            elif action == "click" or action == "hover":
+                selector = effective_params.get("selector")
+                text = effective_params.get("text")
+                elem = None
+                if selector:
+                    elem = await page.wait_for_selector(selector)
+                elif text:
+                    elem = await page.get_by_text(text).first
+                
+                if elem:
+                    box = await elem.bounding_box()
+                    if box:
+                        # 计算中心点 + 随机偏移
+                        cx = box['x'] + box['width'] / 2 + random.randint(-5, 5)
+                        cy = box['y'] + box['height'] / 2 + random.randint(-5, 5)
+                        await self._human_mouse_move(page, cx, cy, engine="camoufox")
+                        
+                        if action == "click":
+                            await page.mouse.click(cx, cy)
+                    else:
+                        # 兜底：如果拿不到 box，直接用 playwright 原生点击
+                        await elem.click()
+                else:
+                    raise ValueError(f"Element not found for {action}")
+            elif action == "type":
+                selector = effective_params.get("selector")
+                text = str(effective_params.get("text", ""))
+                if selector:
+                    await page.focus(selector)
+                    for char in text:
+                        await page.keyboard.type(char, delay=random.randint(50, 250))
             elif action == "extract_semantic":
                 # 进化：为 Camoufox 也增加语义压缩逻辑
                 try:
