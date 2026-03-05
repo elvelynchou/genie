@@ -126,6 +126,10 @@ class BrowserAgent(BaseAgent):
         results = []
         for i, item in enumerate(actions):
             action = item.get("action")
+            if not action:
+                self.logger.warning(f"Skipping action {i+1} because 'action' key is missing: {item}")
+                continue
+                
             p = item.get("params", {})
             if not isinstance(p, dict): p = {}
             effective_params = {**item, **p}
@@ -141,7 +145,9 @@ class BrowserAgent(BaseAgent):
                     ax_nodes = await page.send(uc.cdp.accessibility.get_full_ax_tree())
                     # 进化：使用压缩算法处理语义树
                     compressed_view = self._compress_ax_tree(ax_nodes)
+                    # 同时标记为 semantic_tree 和 page_content 满足模型预期
                     results.append({"type": "semantic_tree", "data": compressed_view})
+                    results.append({"type": "page_content", "data": compressed_view})
                     self.logger.info(f"Extracted semantic tree ({len(compressed_view)} chars)")
                 except Exception as e:
                     self.logger.warning(f"Semantic extraction failed: {e}")
@@ -165,6 +171,10 @@ class BrowserAgent(BaseAgent):
         results = []
         for i, item in enumerate(actions):
             action = item.get("action")
+            if not action:
+                self.logger.warning(f"Skipping Camoufox action {i+1} because 'action' key is missing: {item}")
+                continue
+
             p = item.get("params", {})
             if not isinstance(p, dict): p = {}
             effective_params = {**item, **p}
@@ -193,6 +203,7 @@ class BrowserAgent(BaseAgent):
                             return items.join('\\n');
                         }""")
                     results.append({"type": "semantic_tree", "data": text_content})
+                    results.append({"type": "page_content", "data": text_content})
                     self.logger.info(f"Extracted semantic content ({len(text_content)} chars)")
                 except Exception as e:
                     self.logger.warning(f"Camoufox semantic failed: {e}")

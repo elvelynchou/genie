@@ -332,12 +332,13 @@ async def handle_message(message: types.Message, forced_input: str = None):
                                 logger.info("File/Report/Browse sent. Terminating loop.")
                                 await message.answer("✅ 任务执行完毕。"); break
                     
-                    # 针对没有文件返回但成功的抓取任务，强制终止
+                    # 针对没有文件返回但成功的抓取任务，强制终止工具使用，逼迫其输出总结
                     if is_browse_task:
-                        current_input = f"Tool {agent_name} SUCCESS. Content obtained: {json.dumps(result.data)[:2000]}. NOW PLEASE PROVIDE THE FINAL SUMMARY TO THE USER."
-                        # 这里不直接 break，让下一轮输出总结文本
+                        current_input = f"Tool {agent_name} SUCCESS. Content obtained: {json.dumps(result.data)[:3000]}. NOW SUMMARIZE THIS CONTENT DIRECTLY TO THE USER. DO NOT CALL ANY MORE TOOLS."
+                        # 核心进化：清空可用工具，防止死循环
+                        available_tools = [] 
                     else:
-                        current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"; 
+                        current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"
                     
                     await redis_mgr.set_state(chat_id, result.data)
                 else: current_input = f"Tool {agent_name} FAILED: {result.errors}"
