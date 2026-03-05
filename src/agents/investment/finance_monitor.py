@@ -66,6 +66,10 @@ class FinanceMonitorAgent(BaseAgent):
 
         # 3. 解析结果并清洗
         results = res.data.get("results", [])
+        
+        # 进化：由于 BrowserAgent 现在会同时返回多种 type 满足 LLM，
+        # 我们这里通过 index 步长或过滤来确保每个 extract_semantic 动作只取一份数据。
+        # 最稳妥的方法是只保留 type == 'semantic_tree' 的结果
         semantic_data_blocks = [r["data"] for r in results if r.get("type") == "semantic_tree"]
         
         if len(semantic_data_blocks) == 0:
