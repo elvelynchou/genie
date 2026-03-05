@@ -60,7 +60,8 @@ OPERATIONAL DIRECTIVES:
 2. METADATA REPORTING: Always report 'file_path' locations.
 3. IMAGE WORKFLOW: Use 'prompt_inverse' then 'image_template_creator' for templating.
 4. FINANCE PIPELINE: When monitoring finance, the system uses Browser -> Cleaner -> RAG -> Report. 
-5. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for X/video, Nanobanana, and Skill tasks.
+5. BROWSER STRATEGY: When using 'stealth_browser' to read a page, you MUST include at least two actions: 1) {"action": "goto", "url": "..."} and 2) {"action": "extract_semantic"}. Without 'extract_semantic', you will receive no data back.
+6. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for X/video, Nanobanana, and Skill tasks.
 """
 orchestrator = GeminiOrchestrator(api_key=GEMINI_KEY, system_instruction=system_instruction)
 

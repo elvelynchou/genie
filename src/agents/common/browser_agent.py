@@ -24,7 +24,7 @@ class BrowserAgentInput(BaseModel):
 
 class BrowserAgent(BaseAgent):
     name = "stealth_browser"
-    description = "Advanced stealth browser agent. Supports 'nodriver' (default) and 'camoufox' (high-stealth Firefox) engines. Uses BrowserForge for fingerprinting."
+    description = "Advanced stealth browser agent. Actions: goto (url), click (selector/text), type (selector, text), wait (seconds), snapshot, extract_semantic. IMPORTANT: You MUST include 'extract_semantic' as an action to actually get the page content back."
     input_schema = BrowserAgentInput
     
     PROFILES_BASE_DIR = "/etc/myapp/genie/profiles"
@@ -36,7 +36,8 @@ class BrowserAgent(BaseAgent):
         self.header_gen = HeaderGenerator()
 
     async def run(self, params: BrowserAgentInput, chat_id: str) -> AgentResult:
-        self.logger.info(f"Starting {params.engine} browser for {chat_id} (Profile: {params.profile})")
+        self.logger.info(f"Starting {params.engine} browser for {chat_id} (Profile: {params.profile}, Headless: {params.headless})")
+        self.logger.info(f"Planned actions: {params.actions}")
         
         profile_path = os.path.join(self.PROFILES_BASE_DIR, params.profile)
         os.makedirs(profile_path, exist_ok=True)
@@ -44,10 +45,17 @@ class BrowserAgent(BaseAgent):
 
         logs = [{"step": "initialization", "engine": params.engine, "profile": params.profile}]
         
-        if params.engine == "camoufox":
-            return await self._run_camoufox(params, profile_path, chat_id, logs)
-        else:
-            return await self._run_nodriver(params, profile_path, chat_id, logs)
+        try:
+            if params.engine == "camoufox":
+                result = await self._run_camoufox(params, profile_path, chat_id, logs)
+            else:
+                result = await self._run_nodriver(params, profile_path, chat_id, logs)
+            
+            self.logger.info(f"Browser agent run finished with status: {result.status}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Global browser run error: {e}", exc_info=True)
+            return AgentResult(status="FAILED", errors=str(e), logs=logs)
 
     async def _run_nodriver(self, params: BrowserAgentInput, profile_path: str, chat_id: str, logs: list) -> AgentResult:
         browser = None
@@ -122,6 +130,8 @@ class BrowserAgent(BaseAgent):
             if not isinstance(p, dict): p = {}
             effective_params = {**item, **p}
             
+            self.logger.info(f"Executing Nodriver action {i+1}: {action} with params {effective_params}")
+            
             if action == "goto":
                 url = effective_params.get("url")
                 if not url: raise ValueError(f"Action 'goto' missing 'url' parameter")
@@ -132,42 +142,22 @@ class BrowserAgent(BaseAgent):
                     # 进化：使用压缩算法处理语义树
                     compressed_view = self._compress_ax_tree(ax_nodes)
                     results.append({"type": "semantic_tree", "data": compressed_view})
+                    self.logger.info(f"Extracted semantic tree ({len(compressed_view)} chars)")
                 except Exception as e:
                     self.logger.warning(f"Semantic extraction failed: {e}")
             elif action == "snapshot":
                 path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}.png")
                 await page.save_screenshot(path)
                 results.append({"type": "screenshot", "file_path": path})
+                self.logger.info(f"Saved screenshot to {path}")
             elif action == "wait":
                 seconds = effective_params.get("seconds", 5)
+                self.logger.info(f"Waiting for {seconds}s...")
                 await asyncio.sleep(float(seconds))
             logs.append({"step": f"action_{i+1}", "action": action})
         return results
 
-    def _compress_ax_tree(self, nodes) -> str:
-        """
-        核心进化：将原始 CDP 语义节点压缩为 LLM 友好的精简文本。
-        过滤冗余容器，仅保留交互元素和核心文本。
-        """
-        compressed = []
-        interesting_roles = ['button', 'link', 'textbox', 'heading', 'checkbox', 'searchbox', 'menuitem']
-        
-        for node in nodes:
-            name = node.name.value if node.name and node.name.value else ""
-            role = node.role.value if node.role else "unknown"
-            
-            # 过滤规则：必须有名字，或者是重要的交互角色
-            if not name.strip() and role not in interesting_roles:
-                continue
-            
-            # 进一步精简描述
-            if role == 'statictext' or role == 'unknown':
-                if len(name.strip()) > 5: # 忽略太短的杂碎文字
-                    compressed.append(f"Text: {name.strip()}")
-            else:
-                compressed.append(f"[{role.upper()}] {name.strip()}")
-        
-        return "\n".join(compressed[:150]) # 限制长度防止 Token 溢出
+    # ... (rest of methods)
 
     async def _execute_camoufox_actions(self, page, actions, chat_id, profile, logs):
         """Action executor for camoufox (playwright-based)."""
@@ -177,6 +167,8 @@ class BrowserAgent(BaseAgent):
             p = item.get("params", {})
             if not isinstance(p, dict): p = {}
             effective_params = {**item, **p}
+
+            self.logger.info(f"Executing Camoufox action {i+1}: {action} with params {effective_params}")
 
             if action == "goto":
                 url = effective_params.get("url")
@@ -200,14 +192,17 @@ class BrowserAgent(BaseAgent):
                             return items.join('\n');
                         }""")
                     results.append({"type": "semantic_tree", "data": text_content})
+                    self.logger.info(f"Extracted semantic content ({len(text_content)} chars)")
                 except Exception as e:
                     self.logger.warning(f"Camoufox semantic failed: {e}")
             elif action == "snapshot":
                 path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}_fox.png")
                 await page.screenshot(path=path)
                 results.append({"type": "screenshot", "file_path": path})
+                self.logger.info(f"Saved snapshot to {path}")
             elif action == "wait":
                 seconds = effective_params.get("seconds", 5)
+                self.logger.info(f"Waiting for {seconds}s...")
                 await asyncio.sleep(float(seconds))
             logs.append({"step": f"action_{i+1}", "action": action})
         return results
