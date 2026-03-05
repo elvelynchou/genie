@@ -268,8 +268,9 @@ async def handle_message(message: types.Message, forced_input: str = None):
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
         force_tool_for_first_round = "finance_monitor"; is_report_task = True
     elif "http" in user_input.lower() and any(kw in user_input.lower() for kw in ["抓取", "fetch", "read", "内容", "浏览器"]):
-        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Use 'stealth_browser' with engine='camoufox' to fetch content from the URL. Must use 'extract_semantic' action."
-        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "link_content_extractor", "file_sender"]]
+        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Use 'stealth_browser' with engine='camoufox' to fetch content. Must use 'extract_semantic' action."
+        # 核心改进：彻底移除 link_content_extractor，防止它作为 fallback 触发死循环
+        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
     else: current_input = user_input
 
@@ -332,10 +333,19 @@ async def handle_message(message: types.Message, forced_input: str = None):
                                 logger.info("File/Report/Browse sent. Terminating loop.")
                                 await message.answer("✅ 任务执行完毕。"); break
                     
-                    # 针对没有文件返回但成功的抓取任务，强制终止工具使用，逼迫其输出总结
+                    # 针对抓取任务，提供清洗后的纯文本，并清空工具箱强制总结
                     if is_browse_task:
-                        current_input = f"Tool {agent_name} SUCCESS. Content obtained: {json.dumps(result.data)[:3000]}. NOW SUMMARIZE THIS CONTENT DIRECTLY TO THE USER. DO NOT CALL ANY MORE TOOLS."
-                        # 核心进化：清空可用工具，防止死循环
+                        extracted = result.data.get("page_content", "")
+                        if not extracted and "results" in result.data:
+                            # 最后的尝试：手动从列表提取
+                            for r in result.data["results"]:
+                                if r.get("data"): extracted = str(r["data"]); break
+
+                        if extracted:
+                            current_input = f"Tool {agent_name} SUCCESS. HERE IS THE WEB CONTENT:\n\n{extracted[:5000]}\n\nNOW SUMMARIZE THIS TO THE USER IMMEDIATELY. DO NOT CALL ANY MORE TOOLS."
+                        else:
+                            current_input = f"Tool {agent_name} SUCCESS but content was surprisingly empty. Tell the user you couldn't find readable text on this specific page."
+
                         available_tools = [] 
                     else:
                         current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"

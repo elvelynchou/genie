@@ -80,10 +80,21 @@ class BrowserAgent(BaseAgent):
             if params.keep_open:
                 await asyncio.sleep(900)
 
+            # 核心优化：将提取到的最长文本直接扁平化到 data 根目录，方便 Orchestrator 读取
+            page_content = ""
+            for r in results_data:
+                if r.get("type") in ["semantic_tree", "page_content", "page_text"]:
+                    if len(str(r.get("data", ""))) > len(page_content):
+                        page_content = str(r.get("data", ""))
+
             return AgentResult(
                 status="SUCCESS",
-                data={"results": results_data, "profile": params.profile},
-                message=f"Nodriver task completed.",
+                data={
+                    "results": results_data, 
+                    "page_content": page_content,
+                    "profile": params.profile
+                },
+                message=f"{params.engine.capitalize()} task completed. Content length: {len(page_content)}",
                 logs=logs
             )
         except Exception as e:
@@ -111,10 +122,21 @@ class BrowserAgent(BaseAgent):
                 if params.keep_open:
                     await asyncio.sleep(900)
                 
+                # 核心优化：将提取到的最长文本直接扁平化到 data 根目录
+                page_content = ""
+                for r in results_data:
+                    if r.get("type") in ["semantic_tree", "page_content", "page_text"]:
+                        if len(str(r.get("data", ""))) > len(page_content):
+                            page_content = str(r.get("data", ""))
+
                 return AgentResult(
                     status="SUCCESS",
-                    data={"results": results_data, "profile": params.profile},
-                    message="Camoufox task completed.",
+                    data={
+                        "results": results_data, 
+                        "page_content": page_content,
+                        "profile": params.profile
+                    },
+                    message=f"Camoufox task completed. Content length: {len(page_content)}",
                     logs=logs
                 )
         except Exception as e:
