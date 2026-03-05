@@ -62,6 +62,7 @@ OPERATIONAL DIRECTIVES:
 4. FINANCE PIPELINE: When monitoring finance, the system uses Browser -> Cleaner -> RAG -> Report. 
 5. BROWSER STRATEGY: When using 'stealth_browser' to read a page, you MUST include at least two actions: 1) {"action": "goto", "url": "..."} and 2) {"action": "extract_semantic"}. Without 'extract_semantic', you will receive no data back.
 6. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for X/video, Nanobanana, and Skill tasks.
+7. KNOWLEDGE UTILIZATION: You have access to a Graph-RAG system. Prioritize information labeled [Relevant Past Experiences & Knowledge] to maintain continuity and honor user preferences.
 """
 orchestrator = GeminiOrchestrator(api_key=GEMINI_KEY, system_instruction=system_instruction)
 
@@ -285,8 +286,33 @@ async def handle_message(message: types.Message, forced_input: str = None):
 
     for i in range(max_iterations):
         history = await redis_mgr.get_history(chat_id); summary = await redis_mgr.get_summary(chat_id); state = await redis_mgr.get_state(chat_id)
+        
+        # 核心进化：Unified Retrieval Engine (Graph + Vector)
+        rag_context = ""
+        if i == 0:
+            try:
+                loop = asyncio.get_event_loop()
+                # 1. Graph Hop: Extract entities and find exact matches
+                entities = await loop.run_in_executor(None, lambda: orchestrator.extract_entities(user_input))
+                graph_results = await redis_mgr.search_by_entities(entities) if entities else []
+                
+                # 2. Vector Search: Find semantic matches
+                vector = await loop.run_in_executor(None, lambda: orchestrator.get_embedding(user_input))
+                vector_results = await redis_mgr.search_vector(vector) if vector else []
+                
+                # 合并去重
+                combined_rag = list(set(graph_results + vector_results))
+                if combined_rag:
+                    rag_context = "\n".join([f"- {res}" for e, res in enumerate(combined_rag)])
+                    logger.info(f"RAG Context loaded: {len(combined_rag)} snippets found via Graph/Vector.")
+            except Exception as e:
+                logger.error(f"RAG retrieval failed: {e}")
+
         loop_input = f"ROOT GOAL: {user_input}\nCURRENT STEP INPUT: {current_input}"
+        if rag_context:
+            loop_input += f"\n[Relevant Past Experiences & Knowledge]:\n{rag_context}"
         if state.get("last_image_path"): loop_input += f"\n[Available Image Context]: {state['last_image_path']}"
+        
         if i == 0: status_msg = await message.answer("🔍 正在处理任务...")
         else: await status_msg.edit_text(f"⏳ 正在执行第 {i} 轮自动化...")
 

@@ -34,15 +34,13 @@ class MemoryRefinerAgent(BaseAgent):
         复盘并总结以下 AI 对话经验。
         当前会话状态：{params.session_status}
         
-        请从以下三个维度提取“核心价值信息”：
-        1. 用户偏好 (User Preferences)：用户喜欢的参数、风格、工作流习惯。
-        2. 工具使用心得 (Tool Instincts)：哪个工具在什么场景下最好用，遇到了什么报错及如何规避。
-        3. 核心事实 (Key Facts)：对话中提到的重要知识点。
+        你的目标是提取“长效知识”并将其结构化为图谱节点。
+        请输出一个 JSON 对象，包含以下字段：
+        1. "insight": 对本次对话核心经验的精炼总结（中文，50字内）。
+        2. "entities": 本次对话涉及的核心实体列表（如：公司名、人名、特定技术、偏好关键词）。
+        3. "relations": 实体间的关系简述（如：Alba -> 声明 -> 不可抗力）。
 
-        要求：
-        - 语言精炼，每条经验不超过 50 字。
-        - 必须输出为结构化的中文。
-        - 如果没有新信息，请返回 'NO_NEW_INSIGHTS'。
+        如果没有新信息，请仅回复 'NO_NEW_INSIGHTS'。
 
         原始对话流：
         {history_text}
@@ -56,13 +54,26 @@ class MemoryRefinerAgent(BaseAgent):
                 lambda: self.orchestrator.chat(refine_prompt, [])
             )
             processed = self.orchestrator.process_response(response)
-            synthesis = processed.get("content", "").strip()
+            raw_synthesis = processed.get("content", "").strip()
 
-            if "NO_NEW_INSIGHTS" in synthesis or len(synthesis) < 5:
+            if "NO_NEW_INSIGHTS" in raw_synthesis or len(raw_synthesis) < 5:
                 return AgentResult(status="SUCCESS", message="No significant insights to store.")
 
-            # 3. Vectorize and Store into L3 (RAG)
-            # We break synthesis into points if needed, but for now store as one block
+            # Parse JSON from model response
+            try:
+                # Basic JSON extraction if model adds markdown
+                json_str = raw_synthesis.replace("```json", "").replace("```", "").strip()
+                data = json.loads(json_str)
+                synthesis = data.get("insight", "")
+                entities = data.get("entities", [])
+                # Relations can be added to the content for now
+                relations = data.get("relations", [])
+            except:
+                synthesis = raw_synthesis
+                entities = []
+                relations = []
+
+            # 3. Vectorize and Store into L3 (RAG) with Entities
             embedding = await loop.run_in_executor(
                 None,
                 lambda: self.orchestrator.get_embedding(synthesis)
@@ -70,17 +81,22 @@ class MemoryRefinerAgent(BaseAgent):
 
             if embedding:
                 doc_id = f"instinct_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}"
+                content_block = f"[Learned Experience]: {synthesis}"
+                if relations:
+                    content_block += f"\n[Relations]: {', '.join(relations)}"
+                
                 await self.redis_mgr.store_vector(
                     doc_id=doc_id,
                     vector=embedding,
-                    content=f"[Learned Experience]: {synthesis}"
+                    content=content_block,
+                    entities=entities
                 )
-                logs.append({"step": "stored_to_rag", "id": doc_id})
+                logs.append({"step": "stored_to_graph_rag", "id": doc_id, "entities": entities})
 
             return AgentResult(
                 status="SUCCESS",
-                data={"insight": synthesis},
-                message="Memory refined and stored as learned instinct.",
+                data={"insight": synthesis, "entities": entities},
+                message="Memory refined and stored in Lightweight Logic Graph.",
                 logs=logs
             )
 

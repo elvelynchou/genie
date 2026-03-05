@@ -64,31 +64,57 @@ class RedisManager:
 
     # --- L3: Vector / RAG (Now on DB 0) ---
     def init_vector_index(self, dim: int = 768):
-        """Initialize Vector Index on DB 0."""
+        """Initialize Vector Index with Entity Tagging support."""
         try:
             self.client.execute_command(
                 "FT.CREATE", self.index_name, "ON", "HASH", "PREFIX", "1", "doc:",
-                "SCHEMA", "content", "TEXT", 
+                "SCHEMA", 
+                "content", "TEXT", 
+                "entities", "TAG", "SEPARATOR", ",",
                 "vector", "VECTOR", "HNSW", "6", "TYPE", "FLOAT32", "DIM", str(dim), "DISTANCE_METRIC", "COSINE"
             )
-            self.logger.info(f"Vector index {self.index_name} created on DB 0.")
+            self.logger.info(f"Vector index {self.index_name} (with Tags) created on DB 0.")
             self.rag_enabled = True
         except redis.exceptions.ResponseError as e:
             if "Index already exists" in str(e):
+                # Optionally check if entities field exists, if not, recreate or alter
                 self.logger.info("Vector index already exists.")
                 self.rag_enabled = True
             else:
                 self.logger.error(f"Failed to create index: {e}")
                 self.rag_enabled = False
 
-    async def store_vector(self, doc_id: str, vector: List[float], content: str):
+    async def store_vector(self, doc_id: str, vector: List[float], content: str, entities: List[str] = None):
         if not self.rag_enabled: return
         key = f"doc:{doc_id}"
         vector_bin = np.array(vector, dtype=np.float32).tobytes()
-        self.client.hset(key, mapping={
+        mapping = {
             "vector": vector_bin,
             "content": content
-        })
+        }
+        if entities:
+            mapping["entities"] = ",".join(entities)
+            
+        self.client.hset(key, mapping=mapping)
+
+    async def search_by_entities(self, entities: List[str], k: int = 5) -> List[str]:
+        """Exact match search based on entity tags (The 'Hop' in Graph-RAG)."""
+        if not self.rag_enabled or not entities: return []
+        tag_query = " | ".join([f"{{{e}}}" for e in entities])
+        query = f"@entities:({tag_query})"
+        try:
+            res = self.client.execute_command("FT.SEARCH", self.index_name, query, "LIMIT", "0", str(k))
+            results = []
+            if res and res[0] > 0:
+                for i in range(2, len(res), 2):
+                    fields = res[i]
+                    for j in range(0, len(fields), 2):
+                        if fields[j].decode('utf-8') == "content":
+                            results.append(fields[j+1].decode('utf-8'))
+            return results
+        except Exception as e:
+            self.logger.error(f"Entity search failed: {e}")
+            return []
 
     async def search_vector(self, query_vector: List[float], k: int = 3) -> List[str]:
         if not self.rag_enabled: return []

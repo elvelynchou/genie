@@ -94,6 +94,21 @@ class GeminiOrchestrator:
             self.logger.error(f"Summarization error: {e}")
             return current_summary or ""
 
+    def extract_entities(self, text: str) -> List[str]:
+        """Extract core entities for Graph-RAG lookup."""
+        prompt = f"Extract a list of core entities (companies, locations, technical terms, specific preferences) from the following text. Output ONLY a comma-separated list of keywords.\n\nText: {text}"
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
+            raw = response.text.strip()
+            if not raw or "NONE" in raw.upper(): return []
+            return [e.strip() for e in raw.split(",") if e.strip()]
+        except Exception as e:
+            self.logger.error(f"Entity extraction error: {e}")
+            return []
+
     def process_response(self, response: Any):
         if not hasattr(response, 'candidates') or not response.candidates:
             return {"type": "error", "content": "No candidates in response"}
