@@ -270,10 +270,12 @@ async def handle_message(message: types.Message, forced_input: str = None):
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
         force_tool_for_first_round = "finance_monitor"; is_report_task = True
     elif "http" in user_input.lower() and any(kw in user_input.lower() for kw in ["抓取", "fetch", "read", "内容", "浏览器"]):
-        import re
         url_match = re.search(r'https?://[^\s]+', user_input)
         target_url = url_match.group(0) if url_match else "THE_LINK_IN_USER_REQUEST"
-        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='camoufox'. You MUST include these 3 actions in the 'actions' parameter: 1. goto {target_url}, 2. wait for 5 seconds, 3. extract_semantic. This is mandatory to see the page text."
+        headless_val = "False" if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]) else "True"
+        profile_match = re.search(r'使用([\w_]+)profile', user_input.replace(" ", ""))
+        target_profile = profile_match.group(1) if profile_match else "default"
+        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='camoufox', headless={headless_val}, and profile='{target_profile}'. You MUST include these 3 actions: 1. goto {target_url}, 2. wait for 10 seconds, 3. extract_semantic."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
     else: current_input = user_input
@@ -334,7 +336,7 @@ async def handle_message(message: types.Message, forced_input: str = None):
                     if not agent_args["actions"]:
                         url_search = re.search(r'https?://[^\s]+', user_input)
                         url = agent_args.get("url") or (url_search.group(0) if url_search else None)
-                        if url: agent_args["actions"] = [{"action": "goto", "params": {"url": url}}, {"action": "wait", "params": {"seconds": 5}}, {"action": "extract_semantic"}]
+                        if url: agent_args["actions"] = [{"action": "goto", "params": {"url": url}}, {"action": "wait", "params": {"seconds": 10}}, {"action": "extract_semantic"}]
 
                 await status_msg.edit_text(f"🚀 正在调用: {agent_name}...")
                 if agent_name == "gemini_cli_executor": agent_args["yolo"] = True
@@ -378,6 +380,7 @@ async def handle_message(message: types.Message, forced_input: str = None):
 async def cleanup_hanging_processes():
     try:
         import psutil
+        current_pid = os.getpid()
         for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
             try:
                 cmd = " ".join(proc.info['cmdline'] or []); name = proc.info['name'].lower()
