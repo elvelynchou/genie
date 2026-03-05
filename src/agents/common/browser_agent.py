@@ -17,7 +17,10 @@ class BrowserAction(BaseModel):
 
 class BrowserAgentInput(BaseModel):
     profile: str = Field("default", description="Browser profile name to maintain session/login.")
-    actions: List[Dict[str, Any]] = Field(default_factory=list, description="List of browser actions to execute.")
+    actions: List[Dict[str, Any]] = Field(
+        ..., 
+        description="List of actions to execute. Example: [{'action': 'goto', 'params': {'url': 'https://example.com'}}, {'action': 'wait', 'params': {'seconds': 5}}, {'action': 'extract_semantic'}]",
+    )
     headless: bool = Field(True, description="Whether to run in headless mode.")
     keep_open: bool = Field(False, description="Whether to keep the browser window open (max 15 mins).")
     engine: str = Field("camoufox", description="Automation engine: 'nodriver' (Chromium) or 'camoufox' (Firefox).")
@@ -37,7 +40,14 @@ class BrowserAgent(BaseAgent):
 
     async def run(self, params: BrowserAgentInput, chat_id: str) -> AgentResult:
         self.logger.info(f"Starting {params.engine} browser for {chat_id} (Profile: {params.profile}, Headless: {params.headless})")
-        self.logger.info(f"Planned actions: {params.actions}")
+        
+        # 最后的防线：如果 actions 为空或包含空字典，尝试自动补全（针对急躁的模型）
+        processed_actions = [a for a in params.actions if a and a.get("action")]
+        if not processed_actions:
+            self.logger.warning("Agent received empty actions. This usually means the LLM failed to generate parameters. Returning failure to force retry.")
+            return AgentResult(status="FAILED", message="No valid browser actions provided. Please specify 'goto' and 'extract_semantic'.", logs=[])
+
+        self.logger.info(f"Planned actions: {processed_actions}")
         
         profile_path = os.path.join(self.PROFILES_BASE_DIR, params.profile)
         os.makedirs(profile_path, exist_ok=True)

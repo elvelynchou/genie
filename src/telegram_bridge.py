@@ -268,7 +268,13 @@ async def handle_message(message: types.Message, forced_input: str = None):
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
         force_tool_for_first_round = "finance_monitor"; is_report_task = True
     elif "http" in user_input.lower() and any(kw in user_input.lower() for kw in ["抓取", "fetch", "read", "内容", "浏览器"]):
-        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Use 'stealth_browser' with engine='camoufox' to fetch content. You MUST provide a list of actions: 1. {{'action': 'goto', 'params': {{'url': 'THE_URL'}}}}, 2. {{'action': 'wait', 'params': {{'seconds': 5}}}}, 3. {{'action': 'extract_semantic'}}. Replace THE_URL with the actual link."
+        # 获取 URL 并注入到更直观的指令中
+        import re
+        url_match = re.search(r'https?://[^\s]+', user_input)
+        target_url = url_match.group(0) if url_match else "THE_LINK_IN_USER_REQUEST"
+        
+        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='camoufox'. You MUST include these 3 actions in the 'actions' parameter: 1. goto {target_url}, 2. wait for 5 seconds, 3. extract_semantic. This is mandatory to see the page text."
+        
         # 核心改进：彻底移除 link_content_extractor，防止它作为 fallback 触发死循环
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
