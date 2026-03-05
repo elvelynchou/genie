@@ -191,14 +191,14 @@ class BrowserAgent(BaseAgent):
                         text_content = self._compress_playwright_ax(snapshot)
                     else:
                         # 兜底：使用 JS 提取精简 DOM 树
-                        text_content = await page.evaluate(\"\"\"() => {
+                        text_content = await page.evaluate("""() => {
                             const items = [];
                             document.querySelectorAll('button, a, input, h1, h2, h3, p').forEach(el => {
                                 const text = el.innerText || el.placeholder || el.value;
                                 if (text && text.length > 5) items.push(`[${el.tagName}] ${text.trim()}`);
                             });
-                            return items.join('\\n');
-                        }\"\"\")
+                            return items.join('\n');
+                        }""")
                     results.append({"type": "semantic_tree", "data": text_content})
                 except Exception as e:
                     self.logger.warning(f"Camoufox semantic failed: {e}")
@@ -213,7 +213,7 @@ class BrowserAgent(BaseAgent):
         return results
 
     def _compress_playwright_ax(self, snapshot, level=0) -> str:
-        \"\"\"递归处理 Playwright 语义快照\"\"\"
+        """递归处理 Playwright 语义快照"""
         lines = []
         name = snapshot.get('name', '')
         role = snapshot.get('role', '')
