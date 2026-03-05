@@ -11,9 +11,9 @@
       "category": "business"
     },
     {
-      "name": "Yahoo_Finance",
-      "url": "https://finance.yahoo.com/markets/",
-      "category": "markets"
+      "name": "Google_Finance",
+      "url": "https://www.google.com/finance/beta?hl=en",
+      "category": "finance"
     },
     {
       "name": "WSJ_Finance",

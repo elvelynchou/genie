@@ -264,7 +264,8 @@ async def handle_message(message: types.Message, forced_input: str = None):
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'modelscope_generator' immediately to process this image generation request."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["modelscope_generator", "file_sender"]]
         force_tool_for_first_round = "modelscope_generator"; is_image_task = True
-    elif any(kw in user_input.lower() for kw in ["财经", "finance", "快报", "监控"]):
+    elif any(kw in user_input.lower() for kw in ["监控", "获取", "最新", "快报", "monitor", "gather"]) and any(f_kw in user_input.lower() for f_kw in ["财经", "finance"]):
+        # 仅在用户明确要求“获取/监控”时才触发抓取任务
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'finance_monitor' immediately to gather and analyze financial news."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "file_sender", "finance_cleaner"]]
         force_tool_for_first_round = "finance_monitor"; is_report_task = True

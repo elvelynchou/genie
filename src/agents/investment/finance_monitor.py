@@ -102,11 +102,19 @@ class FinanceMonitorAgent(BaseAgent):
                         f.write(f"# {name} - {date_str}\n\n{clean_md}")
                     generated_files.append(file_path)
                     
-                    # 存入 RAG
-                    embedding = await asyncio.get_event_loop().run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md))
+                    # 6. Store to RAG (with Entity Extraction for Graph-RAG)
+                    loop = asyncio.get_event_loop()
+                    embedding = await loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md))
+                    entities = await loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md))
+
                     if embedding:
-                        await self.redis_mgr.store_vector(f"fin_{name}_{date_str}_{chat_id}", embedding, f"Source: {name}\n{clean_md}")
-                    
+                        await self.redis_mgr.store_vector(
+                            doc_id=f"fin_{name}_{date_str}_{chat_id}",
+                            vector=embedding,
+                            content=f"Source: {name} | Date: {date_str}\n{clean_md}",
+                            entities=entities
+                        )
+
                     digest_payload += f"\n--- {name} ---\n{clean_md}\n"
                     self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
                     self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
