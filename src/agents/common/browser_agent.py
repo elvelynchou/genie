@@ -118,60 +118,22 @@ class BrowserAgent(BaseAgent):
         results = []
         for i, item in enumerate(actions):
             action = item.get("action")
-            # Robust parameter extraction: handle both nested 'params' and flat dict
             p = item.get("params", {})
             if not isinstance(p, dict): p = {}
-            # Fallback to item itself if params is empty
             effective_params = {**item, **p}
             
             if action == "goto":
                 url = effective_params.get("url")
-                if not url:
-                    raise ValueError(f"Action 'goto' missing 'url' parameter in {item}")
+                if not url: raise ValueError(f"Action 'goto' missing 'url' parameter")
                 await page.get(url)
             elif action == "extract_semantic":
                 try:
                     ax_nodes = await page.send(uc.cdp.accessibility.get_full_ax_tree())
-                    semantic_tree = []
-                    for node in ax_nodes:
-                        if node.name and node.name.value:
-                            semantic_tree.append({
-                                "role": node.role.value if node.role else "unknown",
-                                "name": node.name.value,
-                                "backend_id": node.backend_dom_node_id
-                            })
-                    results.append({"type": "semantic_tree", "data": semantic_tree[:100]})
+                    # 进化：使用压缩算法处理语义树
+                    compressed_view = self._compress_ax_tree(ax_nodes)
+                    results.append({"type": "semantic_tree", "data": compressed_view})
                 except Exception as e:
                     self.logger.warning(f"Semantic extraction failed: {e}")
-            elif action == "click_node":
-                backend_id = effective_params.get("backend_id")
-                if not backend_id:
-                    raise ValueError(f"Action 'click_node' missing 'backend_id'")
-                obj = await page.send(uc.cdp.dom.resolve_node(backend_node_id=backend_id))
-                await page.send(uc.cdp.runtime.call_function_on(
-                    function_declaration="(elem) => elem.click()",
-                    object_id=obj.object_id
-                ))
-            elif action == "click":
-                selector = effective_params.get("selector")
-                text = effective_params.get("text")
-                if selector:
-                    elem = await page.select(selector)
-                    await elem.click()
-                elif text:
-                    elem = await page.find(text, best_match=True)
-                    await elem.click()
-                else:
-                    raise ValueError(f"Action 'click' requires 'selector' or 'text'")
-            elif action == "type":
-                selector = effective_params.get("selector")
-                text = effective_params.get("text")
-                if not selector or text is None:
-                    raise ValueError(f"Action 'type' requires 'selector' and 'text'")
-                elem = await page.select(selector)
-                for char in str(text):
-                    await elem.send_keys(char)
-                    await asyncio.sleep(random.uniform(0.05, 0.15))
             elif action == "snapshot":
                 path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}.png")
                 await page.save_screenshot(path)
@@ -181,6 +143,31 @@ class BrowserAgent(BaseAgent):
                 await asyncio.sleep(float(seconds))
             logs.append({"step": f"action_{i+1}", "action": action})
         return results
+
+    def _compress_ax_tree(self, nodes) -> str:
+        """
+        核心进化：将原始 CDP 语义节点压缩为 LLM 友好的精简文本。
+        过滤冗余容器，仅保留交互元素和核心文本。
+        """
+        compressed = []
+        interesting_roles = ['button', 'link', 'textbox', 'heading', 'checkbox', 'searchbox', 'menuitem']
+        
+        for node in nodes:
+            name = node.name.value if node.name and node.name.value else ""
+            role = node.role.value if node.role else "unknown"
+            
+            # 过滤规则：必须有名字，或者是重要的交互角色
+            if not name.strip() and role not in interesting_roles:
+                continue
+            
+            # 进一步精简描述
+            if role == 'statictext' or role == 'unknown':
+                if len(name.strip()) > 5: # 忽略太短的杂碎文字
+                    compressed.append(f"Text: {name.strip()}")
+            else:
+                compressed.append(f"[{role.upper()}] {name.strip()}")
+        
+        return "\n".join(compressed[:150]) # 限制长度防止 Token 溢出
 
     async def _execute_camoufox_actions(self, page, actions, chat_id, profile, logs):
         """Action executor for camoufox (playwright-based)."""
@@ -196,32 +183,25 @@ class BrowserAgent(BaseAgent):
                 if not url: raise ValueError("goto requires url")
                 await page.goto(url)
             elif action == "extract_semantic":
-                # Fallback to innerText extraction if accessibility tree is unavailable
+                # 进化：为 Camoufox 也增加语义压缩逻辑
                 try:
-                    # In some Playwright versions/wrappers, accessibility might be a property or method
+                    text_content = ""
                     if hasattr(page, 'accessibility'):
-                        tree = await page.accessibility.snapshot()
-                        results.append({"type": "semantic_tree", "data": tree})
+                        snapshot = await page.accessibility.snapshot()
+                        text_content = self._compress_playwright_ax(snapshot)
                     else:
-                        # Direct DOM text extraction
-                        text = await page.evaluate("() => document.body.innerText")
-                        results.append({"type": "page_text", "data": text})
+                        # 兜底：使用 JS 提取精简 DOM 树
+                        text_content = await page.evaluate(\"\"\"() => {
+                            const items = [];
+                            document.querySelectorAll('button, a, input, h1, h2, h3, p').forEach(el => {
+                                const text = el.innerText || el.placeholder || el.value;
+                                if (text && text.length > 5) items.push(`[${el.tagName}] ${text.trim()}`);
+                            });
+                            return items.join('\\n');
+                        }\"\"\")
+                    results.append({"type": "semantic_tree", "data": text_content})
                 except Exception as e:
-                    self.logger.warning(f"Semantic extraction failed, using innerText: {e}")
-                    text = await page.evaluate("() => document.body.innerText")
-                    results.append({"type": "page_text", "data": text})
-            elif action == "click":
-                selector = effective_params.get("selector")
-                text = effective_params.get("text")
-                if selector:
-                    await page.click(selector)
-                elif text:
-                    await page.get_by_text(text).click()
-            elif action == "type":
-                selector = effective_params.get("selector")
-                text = effective_params.get("text")
-                if selector and text is not None:
-                    await page.fill(selector, str(text))
+                    self.logger.warning(f"Camoufox semantic failed: {e}")
             elif action == "snapshot":
                 path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}_fox.png")
                 await page.screenshot(path=path)
@@ -231,3 +211,17 @@ class BrowserAgent(BaseAgent):
                 await asyncio.sleep(float(seconds))
             logs.append({"step": f"action_{i+1}", "action": action})
         return results
+
+    def _compress_playwright_ax(self, snapshot, level=0) -> str:
+        \"\"\"递归处理 Playwright 语义快照\"\"\"
+        lines = []
+        name = snapshot.get('name', '')
+        role = snapshot.get('role', '')
+        
+        if name and len(name.strip()) > 2:
+            lines.append(f"{'  ' * level}[{role}] {name}")
+            
+        for child in snapshot.get('children', []):
+            lines.append(self._compress_playwright_ax(child, level + 1))
+            
+        return "\n".join([l for l in lines if l.strip()])[:5000]
