@@ -103,19 +103,19 @@ def escape_markdown(text: str) -> str:
     return text
 
 async def safe_send_message(message_or_id, text: str):
-    parse_mode = "Markdown"
     target_id = message_or_id.chat.id if hasattr(message_or_id, 'chat') else message_or_id
-    CHUNK_SIZE = 4000
+    CHUNK_SIZE = 3500
     chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
     for chunk in chunks:
         try:
-            await bot.send_message(target_id, chunk, parse_mode=parse_mode)
-        except TelegramBadRequest:
+            await bot.send_message(target_id, chunk, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Markdown send failed, retrying chunk as plain text: {e}")
             try:
-                # 最后的兜底：如果 Markdown 解析失败，发送纯文本
                 await bot.send_message(target_id, chunk, parse_mode=None)
-            except Exception as e:
-                logger.error(f"Failed to send message chunk: {e}")
+            except Exception as e2:
+                logger.error(f"Failed to send chunk: {e2}")
+        await asyncio.sleep(0.5)
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
@@ -476,7 +476,15 @@ async def cleanup_hanging_processes():
     except: pass
 
 async def main():
-    await cleanup_hanging_processes(); logger.info("Starting GenieBot..."); scheduler_mgr.start(); await dp.start_polling(bot)
+    while True:
+        try:
+            await cleanup_hanging_processes()
+            logger.info("Starting GenieBot Bridge-03...")
+            scheduler_mgr.start()
+            await dp.start_polling(bot)
+        except Exception as e:
+            logger.error(f"Bot crashed with error: {e}. Restarting in 10 seconds...", exc_info=True)
+            await asyncio.sleep(10)
 
 if __name__ == "__main__":
     asyncio.run(main())

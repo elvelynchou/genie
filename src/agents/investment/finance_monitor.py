@@ -84,14 +84,19 @@ class FinanceMonitorAgent(BaseAgent):
             self.logger.info(f"[{idx+1}/{total_blocks}] Processing source: {name} (Text len: {len(raw_text)})")
             
             try:
+                if not raw_text or len(str(raw_text)) < 10:
+                    self.logger.warning(f"[{idx+1}/{total_blocks}] {name} text too short or None. Skipping.")
+                    continue
+
                 # 3.1 清洗 (AI)
                 self.logger.info(f"[{idx+1}/{total_blocks}] Cleaning text via Gemini...")
-                clean_res = await cleaner.run(params=cleaner.input_schema(raw_text=raw_text, source_name=name), chat_id=chat_id)
-                if clean_res.status != "SUCCESS": 
+                clean_res = await cleaner.run(params=cleaner.input_schema(raw_text=str(raw_text), source_name=name), chat_id=chat_id)
+                if clean_res.status != "SUCCESS" or not clean_res.data.get("clean_md"): 
                     self.logger.warning(f"Cleaning failed for {name}: {clean_res.errors}")
                     continue
                 
                 clean_md = clean_res.data["clean_md"]
+                if not clean_md: continue
                 item_hash = hashlib.md5(clean_md.encode()).hexdigest()
                 is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
                 
