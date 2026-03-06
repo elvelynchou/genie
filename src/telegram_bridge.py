@@ -454,6 +454,14 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 finally: hb.cancel()
                 
                 if result.status == "SUCCESS":
+                    if agent_name == "finance_monitor":
+                        # 强行阻断：财经任务执行完即刻彻底结束，不给模型任何二次思考的机会
+                        if "report" in result.data:
+                            await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
+                        logger.info("Finance Monitor explicit break. Task complete.")
+                        await message.answer("✅ 财经监控任务执行完毕。")
+                        break
+
                     if "file_path" in result.data:
                         if "nanobanana-output" in result.data["file_path"]:
                             await finalize_nanobanana_output(chat_id, result.data, message)

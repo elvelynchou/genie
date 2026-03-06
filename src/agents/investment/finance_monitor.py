@@ -190,6 +190,5 @@ class FinanceMonitorAgent(BaseAgent):
         return AgentResult(
             status="SUCCESS",
             data={"file_path": digest_path, "report": digest_text},
-            message=f"Pipeline complete. {len(generated_files)} sources updated.",
-            next_steps=["file_sender"]
+            message=f"Pipeline complete. {len(generated_files)} sources updated."
         )
