@@ -261,10 +261,7 @@ class BrowserAgent(BaseAgent):
             async with AsyncCamoufox(
                 headless=params.headless,
                 human=True,
-                screen={
-                    "width": fp.screen.width,
-                    "height": fp.screen.height
-                },
+                screen=fp.screen,
                 headers=fp.headers
             ) as browser:
                 page = await browser.new_page()
