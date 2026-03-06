@@ -50,10 +50,12 @@ class BaseAgent(ABC):
             return result
             
         except Exception as e:
-            self.logger.error(f"Agent {self.name} failed: {e}", exc_info=True)
+            import traceback
+            tb = traceback.format_exc()
+            self.logger.error(f"Agent {self.name} failed: {e}\n{tb}")
             return AgentResult(
                 status="FAILED",
-                errors=str(e),
+                errors=f"{str(e)}\n{tb}",
                 message=f"Agent {self.name} encountered an error: {e}",
                 logs=logs
             )
