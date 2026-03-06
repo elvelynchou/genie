@@ -109,12 +109,13 @@ async def safe_send_message(message_or_id, text: str):
     chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
     for chunk in chunks:
         try:
-            await bot.send_message(target_id, escape_markdown(chunk), parse_mode=parse_mode)
+            await bot.send_message(target_id, chunk, parse_mode=parse_mode)
         except TelegramBadRequest:
             try:
-                await bot.send_message(target_id, chunk, parse_mode=parse_mode)
-            except TelegramBadRequest:
+                # 最后的兜底：如果 Markdown 解析失败，发送纯文本
                 await bot.send_message(target_id, chunk, parse_mode=None)
+            except Exception as e:
+                logger.error(f"Failed to send message chunk: {e}")
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):

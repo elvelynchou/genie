@@ -44,29 +44,25 @@ class SchedulerManager:
             logger.error(f"Nightly dreaming failed: {result.errors}")
 
     async def _safe_send(self, text: str):
-        """Safe message sending with chunking and escaping."""
+        """Safe message sending with chunking and basic MarkdownV2 protection."""
         if not text: return
         
-        # Simple escaping for Markdown
-        escape_chars = r'_*`['
-        safe_text = text
-        for char in escape_chars:
-            safe_text = safe_text.replace(char, f"\\{char}")
-            
+        # 不要在这里进行全局转义，这会破坏 AI 生成的 Markdown 格式
+        # 我们只在发送失败时回退到纯文本模式
         CHUNK_SIZE = 4000
-        chunks = [safe_text[i:i + CHUNK_SIZE] for i in range(0, len(safe_text), CHUNK_SIZE)]
+        chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
         
         for chunk in chunks:
             try:
+                # 尝试以 Markdown 发送
                 await self.bot.send_message(self.admin_chat_id, chunk, parse_mode="Markdown")
             except Exception as e:
-                logger.warning(f"Markdown send failed, retrying without parse_mode: {e}")
+                logger.warning(f"Markdown send failed, falling back to plain text: {e}")
                 try:
-                    # Retry raw if markdown fails
-                    raw_chunk = text[safe_text.find(chunk):safe_text.find(chunk)+len(chunk)]
-                    await self.bot.send_message(self.admin_chat_id, raw_chunk[:4000], parse_mode=None)
-                except:
-                    pass
+                    # 回退到无解析模式
+                    await self.bot.send_message(self.admin_chat_id, chunk, parse_mode=None)
+                except Exception as e2:
+                    logger.error(f"Final send attempt failed: {e2}")
 
     async def half_hourly_finance_report(self):
         """执行半小时一次的财经自动监控"""
