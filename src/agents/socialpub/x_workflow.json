@@ -7,15 +7,19 @@
         "params": { "url": "https://x.com/compose/post" }
       },
       {
-        "step": "wait_for_input",
+        "step": "wait_for_load",
         "action": "wait",
         "params": { "seconds": 5 }
+      },
+      {
+        "step": "inject_native_proxy",
+        "action": "inject_semantic_proxy"
       },
       {
         "step": "focus_and_type",
         "action": "type",
         "params": { 
-          "selector": "[data-testid='tweetTextarea_0']",
+          "selector": "tweetTextarea_0",
           "text": "{content}"
         }
       },
@@ -27,7 +31,7 @@
       {
         "step": "click_post",
         "action": "click",
-        "params": { "selector": "[data-testid='tweetButton']" }
+        "params": { "selector": "tweetButton" }
       },
       {
         "step": "confirm_finish",

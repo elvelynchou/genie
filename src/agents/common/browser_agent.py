@@ -72,11 +72,54 @@ class BrowserAgentInput(BaseModel):
 
 class BrowserAgent(BaseAgent):
     name = "stealth_browser"
-    description = "Advanced stealth browser agent. Actions: goto (url), click (selector/text), type (selector, text), wait (seconds), snapshot, extract_semantic. IMPORTANT: You MUST include 'extract_semantic' as an action to actually get the page content back."
+    description = "Advanced stealth browser agent. Actions: goto (url), click (selector/text), type (selector, text), wait (seconds), snapshot, extract_semantic, inject_semantic_proxy. IMPORTANT: You MUST include 'extract_semantic' as an action to actually get the page content back."
     input_schema = BrowserAgentInput
     
     PROFILES_BASE_DIR = "/etc/myapp/genie/profiles"
     DOWNLOAD_DIR = "/etc/myapp/genie/downloads"
+
+    # 核心进化：Page-Native Semantic Proxy Script
+    SEMANTIC_PROXY_JS = """
+    window.GenieBridge = {
+        findEntity: (query) => {
+            // Priority 1: X.com specific data-testid
+            let el = document.querySelector(`[data-testid="${query}"]`);
+            if (el) return el;
+            
+            // Priority 2: Precise text match for buttons/links
+            const targets = document.querySelectorAll('button, a, [role="button"]');
+            for (let t of targets) {
+                if (t.innerText.trim().toLowerCase() === query.toLowerCase()) return t;
+            }
+            
+            // Priority 3: Aria-label
+            el = document.querySelector(`[aria-label="${query}"]`);
+            if (el) return el;
+
+            return null;
+        },
+        semanticClick: async (query) => {
+            const el = window.GenieBridge.findEntity(query);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                await new Promise(r => setTimeout(r, 500));
+                el.click();
+                return true;
+            }
+            return false;
+        },
+        semanticType: async (query, text) => {
+            const el = window.GenieBridge.findEntity(query);
+            if (el) {
+                el.focus();
+                // This is a 'shallow' type, better used with native keyboard.type
+                // but good for ensuring focus and clearing.
+                return true;
+            }
+            return false;
+        }
+    };
+    """
 
     def __init__(self):
         super().__init__()
@@ -273,9 +316,27 @@ class BrowserAgent(BaseAgent):
                 except Exception as e:
                     self.logger.error(f"Nodriver goto failed for {url}: {e}")
                     results.append({"type": "error", "data": f"Goto failed: {str(e)}"})
+            elif action == "inject_semantic_proxy":
+                try:
+                    await page.evaluate(self.SEMANTIC_PROXY_JS)
+                    self.logger.info("Semantic proxy injected successfully.")
+                    results.append({"type": "status", "data": "Semantic proxy injected"})
+                except Exception as e:
+                    self.logger.warning(f"Failed to inject semantic proxy: {e}")
             elif action == "click" or action == "hover":
                 selector = effective_params.get("selector")
                 text = effective_params.get("text")
+                
+                # 优先尝试使用原生语义代理
+                try:
+                    query = selector or text
+                    if query:
+                        success = await page.evaluate(f"window.GenieBridge ? window.GenieBridge.semanticClick('{query}') : false")
+                        if success:
+                            self.logger.info(f"Native semantic click succeeded for {query}")
+                            continue
+                except: pass
+
                 elem = None
                 if selector:
                     elem = await page.select(selector)
@@ -296,6 +357,14 @@ class BrowserAgent(BaseAgent):
             elif action == "type":
                 selector = effective_params.get("selector")
                 text = str(effective_params.get("text", ""))
+                
+                # 优先尝试使用原生语义代理进行聚焦
+                try:
+                    query = selector
+                    if query:
+                        await page.evaluate(f"window.GenieBridge ? window.GenieBridge.semanticType('{query}') : false")
+                except: pass
+
                 elem = await page.select(selector)
                 if elem:
                     await elem.focus()
@@ -352,9 +421,27 @@ class BrowserAgent(BaseAgent):
                 except Exception as e:
                     self.logger.error(f"Camoufox goto failed for {url}: {e}")
                     results.append({"type": "error", "data": f"Goto failed: {str(e)}"})
+            elif action == "inject_semantic_proxy":
+                try:
+                    await page.evaluate(self.SEMANTIC_PROXY_JS)
+                    self.logger.info("Camoufox: Semantic proxy injected successfully.")
+                    results.append({"type": "status", "data": "Semantic proxy injected"})
+                except Exception as e:
+                    self.logger.warning(f"Camoufox: Failed to inject semantic proxy: {e}")
             elif action == "click" or action == "hover":
                 selector = effective_params.get("selector")
                 text = effective_params.get("text")
+                
+                # 优先尝试使用原生语义代理
+                try:
+                    query = selector or text
+                    if query:
+                        success = await page.evaluate(f"window.GenieBridge ? window.GenieBridge.semanticClick('{query}') : false")
+                        if success:
+                            self.logger.info(f"Camoufox: Native semantic click succeeded for {query}")
+                            continue
+                except: pass
+
                 elem = None
                 if selector:
                     elem = await page.wait_for_selector(selector)
@@ -379,6 +466,14 @@ class BrowserAgent(BaseAgent):
             elif action == "type":
                 selector = effective_params.get("selector")
                 text = str(effective_params.get("text", ""))
+                
+                # 优先尝试使用原生语义代理聚焦
+                try:
+                    query = selector
+                    if query:
+                        await page.evaluate(f"window.GenieBridge ? window.GenieBridge.semanticType('{query}') : false")
+                except: pass
+
                 if selector:
                     await page.focus(selector)
                     # 使用统一的人类打字模拟引擎
