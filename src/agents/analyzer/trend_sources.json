@@ -1,0 +1,24 @@
+{
+  "tech_sources": [
+    {
+      "name": "GitHub Trending",
+      "url": "https://github.com/trending",
+      "description": "Daily trending repositories on GitHub."
+    },
+    {
+      "name": "Skills Search",
+      "url": "https://github.com/search?q=skills&type=repositories&s=stars&o=desc",
+      "description": "Most starred repositories related to 'skills'."
+    },
+    {
+      "name": "AI Agent Search",
+      "url": "https://github.com/search?q=ai+agent&type=repositories&s=stars&o=desc",
+      "description": "Most starred repositories related to 'AI Agents'."
+    },
+    {
+      "name": "Hacker News Show",
+      "url": "https://news.ycombinator.com/show",
+      "description": "Show HN - newest tech projects."
+    }
+  ]
+}

@@ -59,19 +59,32 @@ class SchedulerManager:
             logger.error(f"Scheduled finance monitor failed: {result.errors}")
 
     async def daily_github_report(self, send_raw_files: bool = False):
-        """执行每日 GitHub 趋势分析流"""
+        """执行每日科技趋势分析流"""
         if not self.admin_chat_id:
             logger.error("ADMIN_CHAT_ID not set.")
             return
 
-        logger.info("Starting daily GitHub report task...")
-        await self.bot.send_message(self.admin_chat_id, "🌅 正在获取 GitHub 今日动态...")
+        logger.info("Starting daily tech trend report task...")
+        
+        # 核心进化：从 JSON 加载科技源
+        config_path = "/etc/myapp/genie/src/agents/analyzer/trend_sources.json"
+        tasks = []
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+                    tasks = config.get("tech_sources", [])
+            except Exception as e:
+                logger.error(f"Failed to load tech sources from {config_path}: {e}")
+        
+        if not tasks:
+            # 兜底默认源
+            tasks = [
+                {"name": "Global", "url": "https://github.com/trending"},
+                {"name": "AI Agent", "url": "https://github.com/search?q=ai+agent&type=repositories&s=stars&o=desc"}
+            ]
 
-        tasks = [
-            {"name": "Global", "url": "https://github.com/trending"},
-            {"name": "Skills", "url": "https://github.com/search?q=skills&type=repositories&s=stars&o=desc"},
-            {"name": "AI Agent", "url": "https://github.com/search?q=ai+agent&type=repositories&s=stars&o=desc"}
-        ]
+        await self.bot.send_message(self.admin_chat_id, f"🌅 正在从 {len(tasks)} 个源获取今日科技动态...")
 
         extractor = registry.get_agent("link_content_extractor")
         analyzer = registry.get_agent("trend_analyzer")
