@@ -160,12 +160,12 @@ async def cmd_x_login(message: types.Message):
     if not await is_allowed(message.from_user.id): return
     args = message.text.replace("/x_login", "").strip()
     profile = args if args else "geclibot_profile"
-    await message.answer(f"🌐 正在为 Profile [{profile}] 开启 X 登录窗口 (保持 15 分钟)...")
+    # 强制开启 Chrome (Nodriver) 窗口进行登录
+    await message.answer(f"🌐 正在开启 Chrome (Nodriver) 窗口进行 Profile [{profile}] 登录...")
     agent = registry.get_agent("stealth_browser")
-    # 强制开启 GUI 和保持窗口
     asyncio.create_task(agent.execute(
         str(message.chat.id), 
-        engine="camoufox", 
+        engine="nodriver", 
         headless=False, 
         profile=profile, 
         keep_open=True,
@@ -179,14 +179,14 @@ async def cmd_x_post(message: types.Message):
     if not raw_text:
         await message.answer("Usage: `/x_post [打开窗口] 内容`", parse_mode="Markdown")
         return
-    # 智能判断是否需要 GUI
+    
     use_headless = False if any(kw in raw_text.lower() for kw in ["打开窗口", "gui", "window"]) else True
-    # 智能判断引擎
-    use_engine = "nodriver" if any(kw in raw_text.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver"]) else "camoufox"
+    # 发推默认必须使用 nodriver (Chrome) 以匹配登录态
+    use_engine = "nodriver"
+    
+    content = raw_text.replace("打开窗口", "").replace("gui", "").replace("window", "").strip()
 
-    content = raw_text.replace("打开窗口", "").replace("gui", "").replace("window", "").replace("chrome", "").replace("谷歌", "").strip()
-
-    status = await message.answer(f"🐦 正在通过 {use_engine} 发布推文 (Headless: {use_headless})...")
+    status = await message.answer(f"🐦 正在通过 Chrome (Nodriver) 发布推文 (Headless: {use_headless})...")
     agent = registry.get_agent("xpub")
     result = await agent.execute(str(message.chat.id), content=content, profile="geclibot_profile", headless=use_headless, engine=use_engine)
     await status.delete()
@@ -319,12 +319,13 @@ async def handle_message(message: types.Message, forced_input: str = None):
         keep_open_val = "True" if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]) else "False"
         profile_match = re.search(r'使用([\w_]+)profile', user_input.replace(" ", ""))
         target_profile = profile_match.group(1) if profile_match else "default"
-        # 智能检测：使用的引擎 (Chrome/Nodriver vs 默认 Camoufox)
-        if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver"]):
+        
+        # 核心逻辑：如果是处理 X 发布或包含 Chrome 关键词，必须使用 nodriver (Chrome)
+        if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "x.com", "推特", "twitter", "xpub"]):
             engine_val = "nodriver"
         else:
             engine_val = "camoufox"
-        
+            
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='{engine_val}', headless={headless_val}, profile='{target_profile}', and keep_open={keep_open_val}. Actions: 1. goto {target_url}, 2. extract_semantic."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
@@ -341,20 +342,14 @@ async def handle_message(message: types.Message, forced_input: str = None):
         if i == 0:
             try:
                 loop = asyncio.get_event_loop()
-                # 提取实体用于过滤
                 entities = await loop.run_in_executor(None, lambda: orchestrator.extract_entities(user_input))
-                # 获取查询向量
                 vector = await loop.run_in_executor(None, lambda: orchestrator.get_embedding(user_input))
-                
                 if vector:
-                    # 使用层级化检索：策略优先
                     combined_rag = await redis_mgr.search_hierarchical(vector, entities=entities)
-                    
                     if combined_rag:
                         rag_context = "\n".join([f"- {res}" for res in combined_rag])
                         logger.info(f"Hierarchical RAG loaded: {len(combined_rag)} snippets found.")
-            except Exception as e:
-                logger.error(f"Hierarchical RAG retrieval failed: {e}")
+            except Exception as e: logger.error(f"Hierarchical RAG retrieval failed: {e}")
 
         loop_input = f"ROOT GOAL: {user_input}\nCURRENT STEP INPUT: {current_input}"
         if rag_context: loop_input += f"\n[Relevant Past Experiences & Knowledge]:\n{rag_context}"
@@ -386,32 +381,33 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 agent_name = processed["name"]; agent_args = processed["args"]
                 
                 # 修复逻辑：物理级参数纠偏
-                if agent_name == "stealth_browser":
+                if agent_name == "stealth_browser" or agent_name == "xpub":
                     # 1. 强制纠正引擎
-                    if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver"]):
+                    if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver", "推特", "x.com"]):
                         agent_args["engine"] = "nodriver"
                     else:
-                        agent_args["engine"] = "camoufox"
+                        # 只有在完全没提到 Chrome 且不是社交任务时，才允许 camoufox
+                        if agent_name != "xpub":
+                            agent_args["engine"] = "camoufox"
+                        else:
+                            agent_args["engine"] = "nodriver" # 发推强制 Chrome
 
                     # 2. 强制纠正 Headless 状态
                     if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]):
                         agent_args["headless"] = False
                     
-                    # 2. 强制纠正 Keep Open 状态
+                    # 3. 强制纠正 Keep Open 状态
                     if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]):
                         agent_args["keep_open"] = True
                         agent_args["headless"] = False
                     
-                    # 3. 动态 Profile 识别 (如果模型漏掉了)
+                    # 4. 动态 Profile 识别
                     if "profile" not in agent_args or agent_args["profile"] == "default":
-                        profile_match = re.search(r'使用\s*([\w_]+)', user_input)
-                        if profile_match:
-                            agent_args["profile"] = profile_match.group(1)
-                        elif "geclibot_profile" in user_input:
+                        if "geclibot_profile" in user_input:
                             agent_args["profile"] = "geclibot_profile"
                     
-                    # 4. 修复 Actions
-                    if "actions" in agent_args:
+                    # 5. 修复 Actions (仅限 stealth_browser)
+                    if agent_name == "stealth_browser" and "actions" in agent_args:
                         agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
                         if not agent_args["actions"]:
                             url_search = re.search(r'https?://[^\s]+', user_input)
