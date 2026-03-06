@@ -313,8 +313,11 @@ async def handle_message(message: types.Message, forced_input: str = None):
         keep_open_val = "True" if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]) else "False"
         profile_match = re.search(r'使用([\w_]+)profile', user_input.replace(" ", ""))
         target_profile = profile_match.group(1) if profile_match else "default"
-        # 智能检测：使用的引擎 (默认 Camoufox, 除非显式要求 nodriver)
-        engine_val = "nodriver" if "nodriver" in user_input.lower() else "camoufox"
+        # 智能检测：使用的引擎 (Chrome/Nodriver vs 默认 Camoufox)
+        if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver"]):
+            engine_val = "nodriver"
+        else:
+            engine_val = "camoufox"
         
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='{engine_val}', headless={headless_val}, profile='{target_profile}', and keep_open={keep_open_val}. Actions: 1. goto {target_url}, 2. extract_semantic."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
@@ -373,8 +376,8 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 
                 # 修复逻辑：物理级参数纠偏
                 if agent_name == "stealth_browser":
-                    # 1. 强制纠正引擎 (Chrome/谷歌 默认使用 Camoufox)
-                    if "nodriver" in user_input.lower():
+                    # 1. 强制纠正引擎
+                    if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver"]):
                         agent_args["engine"] = "nodriver"
                     else:
                         agent_args["engine"] = "camoufox"
