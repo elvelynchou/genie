@@ -45,19 +45,19 @@ class FinanceMonitorAgent(BaseAgent):
 
         self.logger.info(f"Starting optimized pipeline for {len(sources)} sources.")
         
-        # 核心优化：合并所有 Action，通过一个 Browser 调用完成所有抓取
+        # 合并所有 Action
         all_actions = []
         source_order = []
         for s in sources:
             all_actions.append({"action": "goto", "params": {"url": s["url"]}})
-            all_actions.append({"action": "wait", "params": {"seconds": 8}}) # 略微缩短等待，保证总时效
+            all_actions.append({"action": "wait", "params": {"seconds": 8}})
             all_actions.append({"action": "extract_semantic"})
             source_order.append(s["name"])
 
         browser = registry.get_agent("stealth_browser")
         cleaner = registry.get_agent("finance_cleaner")
         
-        # 2. 执行一次性浏览器抓取
+        # 2. 执行浏览器抓取
         self.logger.info(f"Executing batch stealth browsing...")
         res = await browser.execute(chat_id, engine="camoufox", headless=True, actions=all_actions)
         
@@ -66,10 +66,6 @@ class FinanceMonitorAgent(BaseAgent):
 
         # 3. 解析结果并清洗
         results = res.data.get("results", [])
-        
-        # 进化：由于 BrowserAgent 现在会同时返回多种 type 满足 LLM，
-        # 我们这里通过 index 步长或过滤来确保每个 extract_semantic 动作只取一份数据。
-        # 最稳妥的方法是只保留 type == 'semantic_tree' 的结果
         semantic_data_blocks = [r["data"] for r in results if r.get("type") == "semantic_tree"]
         
         if len(semantic_data_blocks) == 0:
@@ -79,28 +75,25 @@ class FinanceMonitorAgent(BaseAgent):
         generated_files = []
         date_str = datetime.now().strftime("%Y%m%d_%H%M")
 
-        # 3. 并行处理清洗与存储
-        async def process_single_source(idx, raw_text):
-            if idx >= len(source_order): return None
+        # 顺序处理以保证稳定性，避免并行 API 调用导致的 potential is_set 冲突
+        for idx, raw_text in enumerate(semantic_data_blocks):
+            if idx >= len(source_order): break
             name = source_order[idx]
             
             try:
                 # 调用清洗器
                 clean_res = await cleaner.run(params=cleaner.input_schema(raw_text=raw_text, source_name=name), chat_id=chat_id)
-                if clean_res.status != "SUCCESS": return None
+                if clean_res.status != "SUCCESS": continue
                 
                 clean_md = clean_res.data["clean_md"]
                 item_hash = hashlib.md5(clean_md.encode()).hexdigest()
                 is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
                 
                 if not is_seen or "🚨" in clean_md:
-                    # 并行执行 Embedding 和 实体提取
+                    # 顺序获取 Embedding 和 实体
                     loop = asyncio.get_event_loop()
-                    tasks = [
-                        loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)),
-                        loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md))
-                    ]
-                    embedding, entities = await asyncio.gather(*tasks)
+                    embedding = await loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md))
+                    entities = await loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md))
                     
                     # 保存文件
                     os.makedirs(self.SOURCE_DIR, exist_ok=True)
@@ -115,26 +108,15 @@ class FinanceMonitorAgent(BaseAgent):
                             vector=embedding,
                             content=f"Source: {name} | Date: {date_str}\n{clean_md}",
                             entities=entities,
-                            depth=2 # Data Layer
+                            depth=2
                         )
                     
+                    digest_payload += f"\n--- {name} ---\n{clean_md}\n"
+                    generated_files.append(file_path)
                     self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
                     self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
-                    return {"name": name, "md": clean_md, "path": file_path}
             except Exception as e:
                 self.logger.error(f"Error processing {name}: {e}")
-            return None
-
-        # 启动并行任务
-        self.logger.info(f"Processing {len(semantic_data_blocks)} blocks in parallel...")
-        process_tasks = [process_single_source(i, text) for i, text in enumerate(semantic_data_blocks)]
-        processed_results = await asyncio.gather(*process_tasks)
-
-        # 汇总结果
-        for res in processed_results:
-            if res:
-                digest_payload += f"\n--- {res['name']} ---\n{res['md']}\n"
-                generated_files.append(res['path'])
 
         if not digest_payload:
             return AgentResult(status="SUCCESS", message="No new or significant content found.")

@@ -211,13 +211,41 @@ class BrowserAgent(BaseAgent):
                 browser.stop()
 
     def _compress_ax_tree(self, nodes) -> str:
+        """
+        核心进化：将原始 CDP 语义节点压缩为 LLM 友好的精简文本。
+        """
+        # 兼容性处理：Nodriver 某些版本返回 dict {'nodes': [...]}
+        actual_nodes = nodes
+        if isinstance(nodes, dict) and 'nodes' in nodes:
+            actual_nodes = nodes['nodes']
+        
+        if not isinstance(actual_nodes, list):
+            return "No readable nodes found."
+
         compressed = []
-        interesting_roles = ['button', 'link', 'textbox', 'heading']
-        for node in nodes:
-            name = node.name.value if node.name and node.name.value else ""
-            role = node.role.value if node.role else "unknown"
-            if not name.strip() and role not in interesting_roles: continue
-            compressed.append(f"[{role.upper()}] {name.strip()}")
+        interesting_roles = ['button', 'link', 'textbox', 'heading', 'checkbox', 'searchbox', 'menuitem']
+        
+        for node in actual_nodes:
+            # 兼容性处理：node 可能是对象也可能是字典
+            if hasattr(node, 'name'):
+                name = node.name.value if node.name and node.name.value else ""
+                role = node.role.value if node.role else "unknown"
+            else:
+                # 字典模式
+                name_val = node.get('name', {})
+                name = name_val.get('value', '') if isinstance(name_val, dict) else ''
+                role_val = node.get('role', {})
+                role = role_val.get('value', 'unknown') if isinstance(role_val, dict) else 'unknown'
+            
+            if not name.strip() and role not in interesting_roles:
+                continue
+            
+            if role == 'statictext' or role == 'unknown':
+                if len(name.strip()) > 5:
+                    compressed.append(f"Text: {name.strip()}")
+            else:
+                compressed.append(f"[{role.upper()}] {name.strip()}")
+        
         return "\n".join(compressed[:150])
 
     async def _run_camoufox(self, params: BrowserAgentInput, profile_path: str, chat_id: str, logs: list) -> AgentResult:

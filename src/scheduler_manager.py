@@ -64,18 +64,8 @@ class SchedulerManager:
         
         monitor = registry.get_agent("finance_monitor")
         
-        # 增加心跳提示
-        async def heartbeat():
-            count = 0
-            while True:
-                await asyncio.sleep(20); count += 1
-                try: await self.bot.edit_message_text(f"⏳ 财经监控执行中 ({count*20}s)...", chat_id=self.admin_chat_id, message_id=status_msg.message_id)
-                except: pass
-        
-        hb = asyncio.create_task(heartbeat())
         try:
             result = await monitor.execute(self.admin_chat_id)
-            hb.cancel()
             await self.bot.delete_message(self.admin_chat_id, status_msg.message_id)
             
             if result.status == "SUCCESS":
