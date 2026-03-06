@@ -70,7 +70,7 @@ orchestrator = GeminiOrchestrator(api_key=GEMINI_KEY, system_instruction=system_
 # Register Agents (Unique registration)
 registry.register_agent(LinkContentAgent())
 registry.register_agent(FileSenderAgent(bot_instance=bot))
-registry.register_agent(TrendAnalyzerAgent(orchestrator=orchestrator))
+registry.register_agent(TrendAnalyzerAgent(orchestrator=orchestrator, redis_mgr=redis_mgr))
 registry.register_agent(MemoryRefinerAgent(orchestrator=orchestrator, redis_mgr=redis_mgr))
 registry.register_agent(LogAnchorAgent(orchestrator=orchestrator))
 registry.register_agent(FinanceMonitorAgent(orchestrator=orchestrator, redis_mgr=redis_mgr))

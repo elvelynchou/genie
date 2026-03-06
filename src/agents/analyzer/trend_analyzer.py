@@ -15,11 +15,14 @@ class TrendAnalyzerAgent(BaseAgent):
     description = "Analyzes raw trend data (GitHub, X, etc.) and generates structured insights."
     input_schema = TrendAnalyzerInput
     
-    DOWNLOAD_DIR = "/etc/myapp/genie/downloads/analysis"
+    PROJECT_ROOT = "/etc/myapp/genie"
+    DOWNLOAD_DIR = os.path.join(PROJECT_ROOT, "downloads/analysis")
+    PROTOCOL_PATH = os.path.join(PROJECT_ROOT, "GEMINI.md")
 
-    def __init__(self, orchestrator=None):
+    def __init__(self, orchestrator=None, redis_mgr=None):
         super().__init__()
         self.orchestrator = orchestrator
+        self.redis_mgr = redis_mgr
 
     async def run(self, params: TrendAnalyzerInput, chat_id: str) -> AgentResult:
         if not self.orchestrator:
@@ -27,21 +30,47 @@ class TrendAnalyzerAgent(BaseAgent):
 
         logs = [{"step": "initialization", "target": params.target}]
         
-        # Select Prompt Template with deep project context
+        # 核心进化 1：动态获取物理项目协议
+        project_context = ""
+        # 核心进化 2：从 RAG 检索最近的“习得经验”
+        learned_instincts = ""
+
+        if params.target == "evolution":
+            if os.path.exists(self.PROTOCOL_PATH):
+                try:
+                    with open(self.PROTOCOL_PATH, "r", encoding="utf-8") as f:
+                        project_context = f.read()
+                    logs.append({"step": "loaded_project_protocol"})
+                except Exception as e:
+                    self.logger.error(f"Failed to read project protocol: {e}")
+            
+            if self.redis_mgr:
+                try:
+                    # 检索最近关于“进化、架构、优化”的 RAG 记录
+                    loop = asyncio.get_event_loop()
+                    query = "项目进化 架构优化 系统瓶颈"
+                    vector = await loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(query))
+                    rag_results = await self.redis_mgr.search_vector(vector, k=5)
+                    if rag_results:
+                        learned_instincts = "\n".join([f"- {res}" for res in rag_results])
+                        logs.append({"step": "loaded_rag_instincts", "count": len(rag_results)})
+                except Exception as e:
+                    self.logger.error(f"Failed to load RAG instincts for analysis: {e}")
+
+        # Select Prompt Template with dynamic project context
         prompts = {
             "social": "你是一个资深科技博主。请根据以下趋势内容，写一份吸引人的、适合在 X 和 Threads 上发布的社交媒体文案。包含 Emoji、热门项目点评和相关 Hashtags。要求专业且具有前瞻性。",
-            "evolution": f"""你是一个顶尖 AI 架构师。请深入分析以下内容，寻找对当前 'GenieBot' 项目有“降维打击”意义的进化建议。
+            "evolution": f"""你是一个顶尖 AI 架构师。请深入分析以下趋势内容，寻找对当前 'GenieBot' 项目有“降维打击”意义的进化建议。
             
-            【当前项目技术栈 & 状态】：
-            1. 记忆系统：L1/L2/L3 三层 Redis 混合记忆 + 后台异步 'MemoryRefiner' 认知精炼引擎。
-            2. 浏览器能力：集成 'stealth_browser'（基于 Nodriver 和 Camoufox），支持 BrowserForge 指纹伪装和 CDP 级别控制。
-            3. 插件架构：采用 Gemini CLI 'Pure Skill' 模式，工具与主程序解耦，按需触发。
-            4. 多模态：集成 Vertex AI, Nanobanana, ModelScope 的图生图/文生图，具备 Template Engine 实现 Identity Lock。
-            5. 调度层：支持多步推理 (Reasoning Loop) 和状态共享。
+            【当前项目技术栈 & 最新状态快照】：
+            {project_context if project_context else "暂无快照，请基于通用 Multi-Agent 架构建议。"}
+
+            【最近习得的系统直觉 & 经验 (From RAG)】：
+            {learned_instincts if learned_instincts else "暂无相关习得经验。"}
 
             【任务】：
             对比以上趋势内容，如果发现有技术、库或思路在性能、隐身性、或智能化程度上显著优于我们当前的实现，请给出具体的进化建议。
-            - 如果某个趋势我们已经实现了（如 Browser-use 类似的控制），除非其方案更优，否则不要重复建议。
+            - 如果某个趋势我们已经实现了，除非其方案更优，否则不要重复建议。
             - 关注：更高效的上下文压缩算法、更强的反爬逃逸技术、更自动化的 Agent 自我纠错机制。
             """,
             "general": "你是一个技术分析师。请总结以下趋势，指出当下的技术风向标，并列出 3-5 个最值得关注的项目及其核心价值。"

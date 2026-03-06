@@ -43,23 +43,25 @@
     - Phase 3.5 多模态集成：图片感知 (`image_ocr`, `prompt_inverse`)，模板引擎 (`genimgtemplate`)，与生图后端 (`nanobanana`, `vertex_generator`)。
 - **待执行**: Phase 4 - 自我进化闭环 (Code Gen & Deploy)。
 
-## [SESSION_COMPRESSION_SNAPSHOT: PHASE_3_5_MULTIMODAL_COMPLETE]
-**1. 已实现逻辑 (Done):**
-- **Unified Image Bus**: `telegram_bridge.py` 自动拦截 Telegram 图片并持久化至 `uploads/`。
-- **Perception Agents**: `ImageOCRAgent` (文本提取) 与 `PromptInverseAgent` (逆向解析生图 Prompt + 强结构化 JSON 存档)。
-- **Template Engine**: `TemplateCreatorAgent` 实现带 "Identity Lock" 的结构化参数合并，支持复用。
-- **Generation Backends**: 
-  - `VertexGenAgent`: 基于 Google GenAI (Imagen 3) 异步 API 的原生接入，具备指数退避抗 429 机制。
-  - `Nanobanana MCP`: 深度封装进 `gemini_cli_executor`，通过物理级意图隔离防止路由跑偏，支持多图清洗。
-- **UX & Control**: `/generate` 与 `/edit` 强引导快捷命令；产出图片自动集中在 `img_output/` 不删档。
+## [SESSION_COMPRESSION_SNAPSHOT: PHASE_4_EVOLUTION_IN_PROGRESS]
+**1. 核心架构进化 (Done):**
+- **Unified Finance Pipeline**: 实现了配置驱动 (`sources.json`) 的财经监控流水线。采用 `stealth_browser` 批量抓取 + `FinanceCleaner` 结构化清洗 + RAG 自动存档。
+- **Lightweight Graph-RAG**: 升级了 Redis 索引，支持实体标签 (Entity Tagging)。`MemoryRefiner` 现在能自动提取实体与关系，实现“图谱跳跃”检索。
+- **Cyber Persona Interaction**: `stealth_browser` 引入了贝塞尔曲线鼠标移动、非均匀打字节奏及拼写错误修正模拟，实现了“交互层的身份锁定”。
+- **Smart Routing & Loop Break**: 针对图片、视频、财经、抓取等任务实现了强路由和强制循环阻断，杜绝了工具调用的死循环。
 
-**2. 关键路径 (Key Paths):**
-- 视觉资产: `uploads/` (原图), `src/agents/imgtools/characters/` (人物), `img_output/` (产出)。
-- 模板仓库: `src/agents/imgtools/genimgtemplate/`。
+**2. 交互与控制 (Done):**
+- **GUI/Profile 动态检测**: 实现了对“打开窗口”、“使用特定 profile”等指令的物理级拦截与强制执行。
+- **资源守护**: 增加了 30 分钟超时的僵尸浏览器进程自动清理逻辑（安全避开 Chrome Remote Desktop）。
 
-**3. 下一阶段目标 (Next):**
-- 实现 Agent 自我进化沙盒：`code_gen` -> `sandbox` -> `deploy`。
-- ModelScope API 等扩展模型接入评估。
+**3. 关键路径 (Key Paths):**
+- 配置: `src/agents/investment/sources.json` (财经源), `src/agents/imgtools/genimgtemplate/` (图片模板)。
+- 资产: `downloads/web/` (网页原文), `downloads/finance/` (分析报告), `img_output/` (生图)。
+- 索引: `RediSearch: genie_vdb` (支持 @entities 搜索)。
+
+**4. 下一阶段目标 (Next):**
+- 实现基于 `skill-creator` 的 Agent 自我进化闭环（代码生成、沙盒、部署）。
+- 接入系统资源实时监控告警。
 
 ---
 *此文档由 AI 自动维护，作为系统运行的最高指令依据。*
