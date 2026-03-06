@@ -180,6 +180,31 @@ class BrowserAgent(BaseAgent):
             if not params.keep_open and browser:
                 browser.stop()
 
+    def _compress_ax_tree(self, nodes) -> str:
+        """
+        核心进化：将原始 CDP 语义节点压缩为 LLM 友好的精简文本。
+        过滤冗余容器，仅保留交互元素和核心文本。
+        """
+        compressed = []
+        interesting_roles = ['button', 'link', 'textbox', 'heading', 'checkbox', 'searchbox', 'menuitem']
+        
+        for node in nodes:
+            name = node.name.value if node.name and node.name.value else ""
+            role = node.role.value if node.role else "unknown"
+            
+            # 过滤规则：必须有名字，或者是重要的交互角色
+            if not name.strip() and role not in interesting_roles:
+                continue
+            
+            # 进一步精简描述
+            if role == 'statictext' or role == 'unknown':
+                if len(name.strip()) > 5: # 忽略太短的杂碎文字
+                    compressed.append(f"Text: {name.strip()}")
+            else:
+                compressed.append(f"[{role.upper()}] {name.strip()}")
+        
+        return "\n".join(compressed[:150]) # 限制长度防止 Token 溢出
+
     async def _run_camoufox(self, params: BrowserAgentInput, profile_path: str, chat_id: str, logs: list) -> AgentResult:
         try:
             from camoufox.async_api import AsyncCamoufox
@@ -301,8 +326,6 @@ class BrowserAgent(BaseAgent):
                 await asyncio.sleep(float(seconds))
             logs.append({"step": f"action_{i+1}", "action": action})
         return results
-
-    # ... (rest of methods)
 
     async def _execute_camoufox_actions(self, page, actions, chat_id, profile, logs):
         """Action executor for camoufox (playwright-based)."""
