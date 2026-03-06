@@ -191,7 +191,10 @@ async def cmd_x_post(message: types.Message):
     result = await agent.execute(str(message.chat.id), content=content, profile="geclibot_profile", headless=use_headless, engine=use_engine)
     await status.delete()
     if result.status == "SUCCESS":
-        await message.answer(f"✅ 推文发布成功！\n\n内容预览：\n{content}")
+        snapshot = result.data.get("debug_snapshot")
+        if snapshot:
+            await registry.get_agent("file_sender").execute(str(message.chat.id), file_path=snapshot, delete_after_send=False)
+        await message.answer(f"✅ 推文发布指令执行完毕！\n\n内容预览：\n{content}")
     else:
         await message.answer(f"❌ 发布失败: {result.errors}")
 

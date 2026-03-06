@@ -178,11 +178,18 @@ class BrowserAgent(BaseAgent):
                 os.environ["DISPLAY"] = os.getenv("DISPLAY", ":20.0")
                 os.environ["XAUTHORITY"] = os.getenv("XAUTHORITY", "/home/elvelyn/.Xauthority")
 
+            # 生成真实的指纹和分辨率
             fp = self.fingerprint_gen.generate(browser="chrome", os="windows")
+            
             browser = await uc.start(
                 user_data_dir=profile_path,
                 headless=params.headless,
-                browser_args=["--no-sandbox", "--disable-setuid-sandbox"]
+                browser_args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    f"--window-size={fp.screen.width},{fp.screen.height}",
+                    f"--user-agent={fp.headers['User-Agent']}"
+                ]
             )
             page = browser.main_tab
             results_data = await self._execute_actions(page, params.actions, chat_id, params.profile, logs)
@@ -220,7 +227,18 @@ class BrowserAgent(BaseAgent):
                 os.environ["DISPLAY"] = os.getenv("DISPLAY", ":20.0")
                 os.environ["XAUTHORITY"] = os.getenv("XAUTHORITY", "/home/elvelyn/.Xauthority")
 
-            async with AsyncCamoufox(headless=params.headless) as browser:
+            # 使用真实的指纹
+            fp = self.fingerprint_gen.generate(browser="firefox", os="windows")
+
+            async with AsyncCamoufox(
+                headless=params.headless,
+                human=True,
+                screen={
+                    "width": fp.screen.width,
+                    "height": fp.screen.height
+                },
+                headers=fp.headers
+            ) as browser:
                 page = await browser.new_page()
                 results_data = await self._execute_camoufox_actions(page, params.actions, chat_id, params.profile, logs)
                 if params.keep_open: await asyncio.sleep(900)

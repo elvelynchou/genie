@@ -56,10 +56,20 @@ class XPubAgent(BaseAgent):
             )
             
             if res.status == "SUCCESS":
+                # 提取可能的截图路径用于调试
+                snapshot_path = None
+                for r in res.data.get("results", []):
+                    if r.get("type") == "screenshot":
+                        snapshot_path = r.get("file_path")
+
                 return AgentResult(
                     status="SUCCESS",
-                    message=f"Successfully posted to X using profile '{params.profile}'.",
-                    data={"profile": params.profile, "content_length": len(params.content)}
+                    message=f"Successfully executed X workflow using profile '{params.profile}'.",
+                    data={
+                        "profile": params.profile, 
+                        "content_length": len(params.content),
+                        "debug_snapshot": snapshot_path
+                    }
                 )
             else:
                 return AgentResult(status="FAILED", errors=res.errors, message="Browser failed to complete X workflow.")
