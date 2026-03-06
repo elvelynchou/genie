@@ -231,8 +231,13 @@ class BrowserAgent(BaseAgent):
             
             if action == "goto":
                 url = effective_params.get("url")
+                timeout = effective_params.get("timeout", 60000) # Default to 60s
                 if not url: raise ValueError(f"Action 'goto' missing 'url' parameter")
-                await page.get(url)
+                try:
+                    await page.get(url)
+                except Exception as e:
+                    self.logger.error(f"Nodriver goto failed for {url}: {e}")
+                    results.append({"type": "error", "data": f"Goto failed: {str(e)}"})
             elif action == "click" or action == "hover":
                 selector = effective_params.get("selector")
                 text = effective_params.get("text")
@@ -306,8 +311,14 @@ class BrowserAgent(BaseAgent):
 
             if action == "goto":
                 url = effective_params.get("url")
+                timeout = effective_params.get("timeout", 60000) # Default to 60s
                 if not url: raise ValueError("goto requires url")
-                await page.goto(url)
+                try:
+                    # 使用 60s 超时并等待 DOMContentLoaded 以提高速度
+                    await page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+                except Exception as e:
+                    self.logger.error(f"Camoufox goto failed for {url}: {e}")
+                    results.append({"type": "error", "data": f"Goto failed: {str(e)}"})
             elif action == "click" or action == "hover":
                 selector = effective_params.get("selector")
                 text = effective_params.get("text")
