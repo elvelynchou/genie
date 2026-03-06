@@ -10,6 +10,7 @@ class XPubInput(BaseModel):
     content: str = Field(..., description="The text content to post on X.")
     profile: str = Field("default", description="The browser profile to use.")
     headless: bool = Field(True, description="Whether to run in headless mode.")
+    engine: str = Field("camoufox", description="The browser engine to use (nodriver or camoufox).")
 
 class XPubAgent(BaseAgent):
     name = "xpub"
@@ -43,12 +44,12 @@ class XPubAgent(BaseAgent):
 
         # 2. 调用 stealth_browser 执行
         browser = registry.get_agent("stealth_browser")
-        self.logger.info(f"Initiating X post for profile: {params.profile}")
+        self.logger.info(f"Initiating X post for profile: {params.profile} using engine: {params.engine}")
         
         try:
             res = await browser.execute(
                 chat_id, 
-                engine="camoufox", 
+                engine=params.engine, 
                 headless=params.headless, 
                 profile=params.profile,
                 actions=processed_actions

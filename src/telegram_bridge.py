@@ -179,14 +179,16 @@ async def cmd_x_post(message: types.Message):
     if not raw_text:
         await message.answer("Usage: `/x_post [打开窗口] 内容`", parse_mode="Markdown")
         return
-    
     # 智能判断是否需要 GUI
     use_headless = False if any(kw in raw_text.lower() for kw in ["打开窗口", "gui", "window"]) else True
-    content = raw_text.replace("打开窗口", "").replace("gui", "").replace("window", "").strip()
+    # 智能判断引擎
+    use_engine = "nodriver" if any(kw in raw_text.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver"]) else "camoufox"
 
-    status = await message.answer(f"🐦 正在发布推文 (Headless: {use_headless})...")
+    content = raw_text.replace("打开窗口", "").replace("gui", "").replace("window", "").replace("chrome", "").replace("谷歌", "").strip()
+
+    status = await message.answer(f"🐦 正在通过 {use_engine} 发布推文 (Headless: {use_headless})...")
     agent = registry.get_agent("xpub")
-    result = await agent.execute(str(message.chat.id), content=content, profile="geclibot_profile", headless=use_headless)
+    result = await agent.execute(str(message.chat.id), content=content, profile="geclibot_profile", headless=use_headless, engine=use_engine)
     await status.delete()
     if result.status == "SUCCESS":
         await message.answer(f"✅ 推文发布成功！\n\n内容预览：\n{content}")
