@@ -59,7 +59,7 @@ class FinanceMonitorAgent(BaseAgent):
         if res.status != "SUCCESS":
             return AgentResult(status="FAILED", errors=res.errors, message="Batch browsing failed.")
 
-        # 3. 解析与串行处理 (极致稳定)
+        # 3. 解析与处理
         results = res.data.get("results", [])
         semantic_data_blocks = [r["data"] for r in results if r.get("type") == "semantic_tree"]
         
@@ -80,38 +80,50 @@ class FinanceMonitorAgent(BaseAgent):
                 clean_md = clean_res.data["clean_md"]
                 item_hash = hashlib.md5(clean_md.encode()).hexdigest()
                 
-                # 3.2 存储 (Data Layer)
-                loop = asyncio.get_event_loop()
-                embedding = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)), timeout=60)
-                entities = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)), timeout=60)
-                
-                if embedding:
-                    await self.redis_mgr.store_vector(
-                        doc_id=f"fin_{name}_{date_str}_{chat_id}",
-                        vector=embedding,
-                        content=f"Source: {name} | Date: {date_str}\n{clean_md}",
-                        entities=entities,
-                        depth=2
-                    )
-                
-                digest_payload += f"\n--- {name} ---\n{clean_md}\n"
-                
-                # 落地文件
+                # 3.2 落地文件 (无论是否重复，始终产生文件用于发送)
                 os.makedirs(self.SOURCE_DIR, exist_ok=True)
                 f_path = os.path.join(self.SOURCE_DIR, f"{name}_{date_str}.md")
                 with open(f_path, "w", encoding="utf-8") as f:
                     f.write(f"# {name} - {date_str}\n\n{clean_md}")
                 generated_files.append(f_path)
+
+                # 3.3 去重校验：仅将“新内容”加入摘要分析和 RAG
+                is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
                 
-                self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
+                if not is_seen or "🚨" in clean_md:
+                    # 向量化与实体提取 (Data Layer)
+                    loop = asyncio.get_event_loop()
+                    embedding = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)), timeout=60)
+                    entities = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)), timeout=60)
+                    
+                    if embedding:
+                        await self.redis_mgr.store_vector(
+                            doc_id=f"fin_{name}_{date_str}_{chat_id}",
+                            vector=embedding,
+                            content=f"Source: {name} | Date: {date_str}\n{clean_md}",
+                            entities=entities,
+                            depth=2
+                        )
+                    
+                    digest_payload += f"\n--- {name} ---\n{clean_md}\n"
+                    self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
+                    self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
+                else:
+                    self.logger.info(f"{name} content is duplicate. Skipping digest inclusion.")
+
             except Exception as e:
                 self.logger.error(f"Failed to process {name}: {e}")
 
-        if not digest_payload:
-            return AgentResult(status="SUCCESS", message="No new content.")
+        # 4. 发送所有抓取到的分源文件 (核心改进：无论摘要结果如何都发送)
+        self.logger.info(f"Sending {len(generated_files)} source files...")
+        for f in generated_files:
+            await registry.get_agent("file_sender").execute(chat_id, file_path=f, delete_after_send=False)
 
-        # 4. 生成报告
-        self.logger.info("Generating final report...")
+        if not digest_payload:
+            return AgentResult(status="SUCCESS", message="No significant new changes in digest, but sources updated and sent.")
+
+        # 5. 生成对比简报 (AI)
+        self.logger.info("Generating final contextual report...")
         last_report = self.redis_mgr.client.get(f"last_finance_digest:{chat_id}")
         last_report_text = last_report.decode('utf-8') if last_report else "无上期报告。"
 
@@ -122,21 +134,20 @@ class FinanceMonitorAgent(BaseAgent):
             resp = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.chat(analysis_prompt, [])), timeout=90)
             digest_text = self.orchestrator.process_response(resp).get("content", "Analysis failed.")
         except:
-            digest_text = "分析超时，请查看原始分源文件。"
+            digest_text = "分析生成超时，请查看原始分源文件。"
 
-        # 5. 归档报告
-        self.redis_mgr.client.set(f"last_finance_digest:{chat_id}", digest_text)
-        os.makedirs(self.FINANCE_DIR, exist_ok=True)
-        report_path = os.path.join(self.FINANCE_DIR, f"Research_Report_{date_str}.md")
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write(f"# 财经研究报告 - {date_str}\n\n{digest_text}")
-
-        # 6. 发送文件
-        for f in generated_files:
-            await registry.get_agent("file_sender").execute(chat_id, file_path=f, delete_after_send=False)
-
-        return AgentResult(
-            status="SUCCESS",
-            data={"file_path": report_path, "report": digest_text},
-            message=f"Pipeline complete. {len(generated_files)} sources processed."
-        )
+        # 6. 归档与返回
+        if "暂无重大新变动" not in digest_text:
+            self.redis_mgr.client.set(f"last_finance_digest:{chat_id}", digest_text)
+            os.makedirs(self.FINANCE_DIR, exist_ok=True)
+            report_path = os.path.join(self.FINANCE_DIR, f"Research_Report_{date_str}.md")
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write(f"# 财经研究报告 - {date_str}\n\n{digest_text}")
+            
+            return AgentResult(
+                status="SUCCESS",
+                data={"file_path": report_path, "report": digest_text},
+                message=f"Pipeline complete. {len(generated_files)} sources processed."
+            )
+        else:
+            return AgentResult(status="SUCCESS", message="No significant new changes in digest.")
