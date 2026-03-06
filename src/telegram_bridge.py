@@ -489,18 +489,34 @@ async def cleanup_hanging_processes():
     except: pass
 
 async def main():
-    while True:
+    try:
+        await cleanup_hanging_processes()
+        logger.info("Starting GenieBot Bridge-03 in foreground mode...")
+        scheduler_mgr.start()
+        await dp.start_polling(bot)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.info("Shutdown signal received (Ctrl+C).")
+    except Exception as e:
+        logger.error(f"Bot encountered an error: {e}", exc_info=True)
+    finally:
+        logger.info("Cleaning up resources before exit...")
+        scheduler_mgr.shutdown()
+        # 退出时强制清理所有相关的残留进程 (不再受 30 分钟限制)
         try:
-            await cleanup_hanging_processes()
-            logger.info("Starting GenieBot Bridge-03...")
-            scheduler_mgr.start()
-            await dp.start_polling(bot)
-        except Exception as e:
-            logger.error(f"Bot crashed with error: {e}. Restarting in 10 seconds...", exc_info=True)
-            try:
-                scheduler_mgr.shutdown()
-            except: pass
-            await asyncio.sleep(10)
+            import psutil
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmd = " ".join(proc.info['cmdline'] or [])
+                    if 'gemini' in cmd and '-p' in cmd: proc.kill()
+                    if any(b in proc.info['name'].lower() for b in ['firefox', 'chrome', 'chromium']):
+                        if any(ex in cmd.lower() for ex in ['chrome-remote-desktop', 'chromoting']): continue
+                        proc.kill()
+                except: continue
+        except: pass
+        logger.info("GenieBot stopped.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
