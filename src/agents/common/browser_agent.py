@@ -255,10 +255,9 @@ class BrowserAgent(BaseAgent):
                 os.environ["DISPLAY"] = os.getenv("DISPLAY", ":20.0")
                 os.environ["XAUTHORITY"] = os.getenv("XAUTHORITY", "/home/elvelyn/.Xauthority")
 
-            # 核心修复：不再手动注入指纹对象，让 Camoufox 内部自动处理
+            # 核心修复：移除导致报错的 human 参数
             async with AsyncCamoufox(
-                headless=params.headless,
-                human=True
+                headless=params.headless
             ) as browser:
                 page = await browser.new_page()
                 results_data = await self._execute_camoufox_actions(page, params.actions, chat_id, params.profile, logs)
