@@ -90,38 +90,20 @@ class SchedulerManager:
                 return
 
         logger.info(f"Starting finance monitoring (Manual: {is_manual})...")
-        status_msg = await self.bot.send_message(self.admin_chat_id, "🔍 正在启动自动财经监控 (正在抓取多路源)...")
+        await self.bot.send_message(self.admin_chat_id, "🔍 正在启动自动财经监控...\n[阶段 1/2: 正在抓取多路源数据]")
         
         monitor = registry.get_agent("finance_monitor")
         
-        # 安全进度提示任务
-        async def progress_tracker():
-            for i in range(1, 10): # 最多运行 3 分钟
-                await asyncio.sleep(20)
-                try:
-                    await self.bot.edit_message_text(
-                        f"⏳ 财经监控执行中 (约 {i*20}s)...\n[阶段: 抓取完毕 -> 正在执行 AI 并行分析]", 
-                        chat_id=self.admin_chat_id, 
-                        message_id=status_msg.message_id
-                    )
-                except: pass
-        
-        tracker_task = asyncio.create_task(progress_tracker())
-        
         try:
+            # 运行重型任务
             result = await monitor.execute(self.admin_chat_id)
-            tracker_task.cancel()
-            try:
-                await self.bot.delete_message(self.admin_chat_id, status_msg.message_id)
-            except: pass
             
             if result.status == "SUCCESS":
                 if "No new content" in result.message or "No significant new changes" in result.message:
                     logger.info("Finance monitor: No significant new changes. Staying silent.")
                 else:
                     report_text = result.data.get("report", "")
-                    header = "📊 **财经自动快报 (30m)**：\n\n"
-                    await self._safe_send(header + report_text)
+                    await self._safe_send(f"📊 **财经自动快报** (北京时间 {datetime.now(self.tz).strftime('%H:%M')}):\n\n{report_text}")
             else:
                 logger.error(f"Scheduled finance monitor failed: {result.errors}")
                 await self.bot.send_message(self.admin_chat_id, f"❌ 财经监控执行失败: {result.errors[:500]}")
