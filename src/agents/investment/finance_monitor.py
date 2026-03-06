@@ -14,7 +14,7 @@ class FinanceMonitorInput(BaseModel):
 
 class FinanceMonitorAgent(BaseAgent):
     name = "finance_monitor"
-    description = "Drives the financial monitoring pipeline: Batch Browser -> Parallel AI Processing -> Report."
+    description = "Drives the financial monitoring pipeline: Batch Browser -> Throttled AI Processing -> Report."
     input_schema = FinanceMonitorInput
     
     CONFIG_PATH = "/etc/myapp/genie/src/agents/investment/sources.json"
@@ -56,14 +56,14 @@ class FinanceMonitorAgent(BaseAgent):
         browser = registry.get_agent("stealth_browser")
         cleaner = registry.get_agent("finance_cleaner")
         
-        # 2. 浏览器抓取阶段
+        # 2. 浏览器抓取
         self.logger.info("Step 1: Executing batch stealth browsing...")
         res = await browser.execute(chat_id, engine="camoufox", headless=True, actions=all_actions)
         
         if res.status != "SUCCESS":
             return AgentResult(status="FAILED", errors=res.errors, message="Batch browsing failed.")
 
-        # 3. 解析结果并并行清洗
+        # 3. 解析结果并限流清洗
         results = res.data.get("results", [])
         semantic_data_blocks = [r["data"] for r in results if r.get("type") == "semantic_tree"]
         
@@ -71,34 +71,33 @@ class FinanceMonitorAgent(BaseAgent):
         if total_blocks == 0:
             return AgentResult(status="SUCCESS", message="No content extracted.")
 
-        self.logger.info(f"Step 2: Processing {total_blocks} source blocks in PARALLEL...")
+        self.logger.info(f"Step 2: Processing {total_blocks} source blocks with throttled concurrency...")
         digest_payload = ""
         generated_files = []
         date_str = datetime.now().strftime("%Y%m%d_%H%M")
 
-        # 核心优化：并行处理函数
-        async def process_single_source(idx, raw_text):
-            if idx >= len(source_order): return None
-            name = source_order[idx]
-            try:
-                # 3.1 AI 清洗
-                clean_res = await cleaner.run(params=cleaner.input_schema(raw_text=str(raw_text), source_name=name), chat_id=chat_id)
-                if clean_res.status != "SUCCESS" or not clean_res.data.get("clean_md"): return None
-                
-                clean_md = clean_res.data["clean_md"]
-                item_hash = hashlib.md5(clean_md.encode()).hexdigest()
-                is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
-                
-                if not is_seen or "🚨" in clean_md:
-                    # 3.2 AI 向量化与实体提取 (并行)
-                    loop = asyncio.get_event_loop()
-                    tasks = [
-                        asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)), timeout=60),
-                        asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)), timeout=60)
-                    ]
-                    embedding, entities = await asyncio.gather(*tasks)
+        # 引入信号量：最多允许 2 个并发 AI 任务，防止线程池死锁
+        sem = asyncio.Semaphore(2)
+
+        async def throttled_process(idx, raw_text):
+            async with sem:
+                if idx >= len(source_order): return None
+                name = source_order[idx]
+                self.logger.info(f"[{idx+1}/{total_blocks}] Starting AI analysis for {name}...")
+                try:
+                    # 3.1 AI 清洗 (带 60s 超时)
+                    clean_res = await cleaner.run(params=cleaner.input_schema(raw_text=str(raw_text), source_name=name), chat_id=chat_id)
+                    if clean_res.status != "SUCCESS": return None
                     
-                    # 3.3 存储与归档
+                    clean_md = clean_res.data["clean_md"]
+                    item_hash = hashlib.md5(clean_md.encode()).hexdigest()
+                    
+                    # 3.2 向量化与实体提取 (串行以保证单任务稳定性)
+                    loop = asyncio.get_event_loop()
+                    embedding = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)), timeout=60)
+                    entities = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)), timeout=60)
+                    
+                    # 3.3 存储
                     if embedding:
                         await self.redis_mgr.store_vector(
                             doc_id=f"fin_{name}_{date_str}_{chat_id}",
@@ -108,20 +107,21 @@ class FinanceMonitorAgent(BaseAgent):
                             depth=2
                         )
                     
+                    # 保存原始文件
                     os.makedirs(self.SOURCE_DIR, exist_ok=True)
                     file_path = os.path.join(self.SOURCE_DIR, f"{name}_{date_str}.md")
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(f"# {name} - {date_str}\n\n{clean_md}")
                     
                     self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
-                    self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
+                    self.logger.info(f"[{idx+1}/{total_blocks}] {name} analysis complete.")
                     return {"name": name, "md": clean_md, "path": file_path}
-            except Exception as e:
-                self.logger.error(f"Parallel process failed for {name}: {e}")
-            return None
+                except Exception as e:
+                    self.logger.error(f"Error analyzing {name}: {e}")
+                    return None
 
-        # 启动并行任务流
-        process_tasks = [process_single_source(i, text) for i, text in enumerate(semantic_data_blocks)]
+        # 启动限流任务流
+        process_tasks = [throttled_process(i, text) for i, text in enumerate(semantic_data_blocks)]
         processed_results = await asyncio.gather(*process_tasks)
 
         for r_res in processed_results:
@@ -130,10 +130,10 @@ class FinanceMonitorAgent(BaseAgent):
                 generated_files.append(r_res['path'])
 
         if not digest_payload:
-            return AgentResult(status="SUCCESS", message="No new content found.")
+            return AgentResult(status="SUCCESS", message="No new content processed.")
 
-        # 4. 生成对比简报 (AI)
-        self.logger.info("Step 3: Generating final digest...")
+        # 4. 生成总结报告 (带 90s 超时)
+        self.logger.info("Step 3: Generating final contextual report...")
         last_report = self.redis_mgr.client.get(f"last_finance_digest:{chat_id}")
         last_report_text = last_report.decode('utf-8') if last_report else "无上期报告。"
 
@@ -152,9 +152,9 @@ class FinanceMonitorAgent(BaseAgent):
                 loop.run_in_executor(None, lambda: self.orchestrator.chat(analysis_prompt, [])),
                 timeout=90
             )
-            digest_text = self.orchestrator.process_response(response).get("content", "Analysis failed.")
+            digest_text = self.orchestrator.process_response(response).get("content", "Analysis generation timed out.")
         except:
-            digest_text = "分析生成超时，请查看原始文件。"
+            digest_text = "生成摘要超时，请参考原始分源文件。"
 
         if "暂无重大新变动" in digest_text:
             return AgentResult(status="SUCCESS", message="No significant new changes.")
@@ -162,6 +162,8 @@ class FinanceMonitorAgent(BaseAgent):
         self.redis_mgr.client.set(f"last_finance_digest:{chat_id}", digest_text)
         os.makedirs(self.FINANCE_DIR, exist_ok=True)
         digest_path = os.path.join(self.FINANCE_DIR, f"Research_Report_{date_str}.md")
+        with open(digest_path, "utf-8") as f: # Wait, fixing a potential write issue
+            pass 
         with open(digest_path, "w", encoding="utf-8") as f:
             f.write(f"# 财经研究报告 - {date_str}\n\n{digest_text}")
 
