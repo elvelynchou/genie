@@ -93,8 +93,23 @@ class SchedulerManager:
         
         monitor = registry.get_agent("finance_monitor")
         
+        # 安全进度提示任务
+        async def progress_tracker():
+            for i in range(1, 10): # 最多运行 3 分钟
+                await asyncio.sleep(20)
+                try:
+                    await self.bot.edit_message_text(
+                        f"⏳ 财经监控执行中 (约 {i*20}s)...\n[阶段: 抓取完毕 -> 正在执行 AI 并行分析]", 
+                        chat_id=self.admin_chat_id, 
+                        message_id=status_msg.message_id
+                    )
+                except: pass
+        
+        tracker_task = asyncio.create_task(progress_tracker())
+        
         try:
             result = await monitor.execute(self.admin_chat_id)
+            tracker_task.cancel()
             try:
                 await self.bot.delete_message(self.admin_chat_id, status_msg.message_id)
             except: pass
