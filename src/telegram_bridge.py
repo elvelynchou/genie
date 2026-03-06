@@ -370,12 +370,24 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 
                 # 修复逻辑：物理级参数纠偏
                 if agent_name == "stealth_browser":
+                    # 1. 强制纠正 Headless 状态
                     if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]):
                         agent_args["headless"] = False
+                    
+                    # 2. 强制纠正 Keep Open 状态
                     if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]):
                         agent_args["keep_open"] = True
                         agent_args["headless"] = False
                     
+                    # 3. 动态 Profile 识别 (如果模型漏掉了)
+                    if "profile" not in agent_args or agent_args["profile"] == "default":
+                        profile_match = re.search(r'使用\s*([\w_]+)', user_input)
+                        if profile_match:
+                            agent_args["profile"] = profile_match.group(1)
+                        elif "geclibot_profile" in user_input:
+                            agent_args["profile"] = "geclibot_profile"
+                    
+                    # 4. 修复 Actions
                     if "actions" in agent_args:
                         agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
                         if not agent_args["actions"]:
@@ -383,6 +395,7 @@ async def handle_message(message: types.Message, forced_input: str = None):
                             url = agent_args.get("url") or (url_search.group(0) if url_search else None)
                             if url: agent_args["actions"] = [{"action": "goto", "params": {"url": url}}, {"action": "wait", "params": {"seconds": 10}}, {"action": "extract_semantic"}]
 
+                logger.info(f"Final Agent Args for {agent_name}: {agent_args}")
                 await status_msg.edit_text(f"🚀 正在调用: {agent_name}...")
                 if agent_name == "gemini_cli_executor": agent_args["yolo"] = True
                 agent = registry.get_agent(agent_name)

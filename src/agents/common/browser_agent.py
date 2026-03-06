@@ -131,6 +131,11 @@ class BrowserAgent(BaseAgent):
     async def _run_nodriver(self, params: BrowserAgentInput, profile_path: str, chat_id: str, logs: list) -> AgentResult:
         browser = None
         try:
+            # Ensure DISPLAY is set for GUI mode
+            if not params.headless:
+                os.environ["DISPLAY"] = os.getenv("DISPLAY", ":20.0")
+                os.environ["XAUTHORITY"] = os.getenv("XAUTHORITY", "/home/elvelyn/.Xauthority")
+
             # Generate a consistent fingerprint for this session if it's a new profile
             fp = self.fingerprint_gen.generate(browser="chrome", os="windows")
             
@@ -179,6 +184,11 @@ class BrowserAgent(BaseAgent):
         try:
             from camoufox.async_api import AsyncCamoufox
             
+            # Ensure DISPLAY is set for GUI mode
+            if not params.headless:
+                os.environ["DISPLAY"] = os.getenv("DISPLAY", ":20.0")
+                os.environ["XAUTHORITY"] = os.getenv("XAUTHORITY", "/home/elvelyn/.Xauthority")
+
             # AsyncCamoufox launch doesn't take user_data_dir directly in most versions
             # If persistence is needed, it's usually handled via context params, 
             # but for stealth news scraping, a fresh context is often better.
