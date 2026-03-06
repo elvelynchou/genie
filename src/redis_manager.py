@@ -100,10 +100,16 @@ class RedisManager:
     async def search_by_entities(self, entities: List[str], k: int = 5) -> List[str]:
         """Exact match search based on entity tags (The 'Hop' in Graph-RAG)."""
         if not self.rag_enabled or not entities: return []
-        tag_query = " | ".join([f"{{{e}}}" for e in entities])
-        query = f"@entities:({tag_query})"
+        
+        # Dialect 2 requires specific escaping or simple tag groups
+        # Correct syntax for multiple tags: @entities:{tag1|tag2}
+        safe_entities = [e.replace(" ", "\\ ") for e in entities]
+        tag_query = "|".join(safe_entities)
+        query = f"@entities:{{{tag_query}}}"
+        
         try:
-            res = self.client.execute_command("FT.SEARCH", self.index_name, query, "LIMIT", "0", str(k))
+            # Use DIALECT 2 for consistent behavior across vector and tag search
+            res = self.client.execute_command("FT.SEARCH", self.index_name, query, "LIMIT", "0", str(k), "DIALECT", "2")
             results = []
             if res and res[0] > 0:
                 for i in range(2, len(res), 2):
