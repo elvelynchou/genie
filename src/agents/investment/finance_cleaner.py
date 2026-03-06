@@ -36,9 +36,10 @@ class FinanceCleanerAgent(BaseAgent):
 
         try:
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, 
-                lambda: self.orchestrator.chat(clean_prompt, [])
+            # 增加 60s 超时保护
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self.orchestrator.chat(clean_prompt, [])),
+                timeout=60
             )
             processed = self.orchestrator.process_response(response)
             clean_md = processed.get("content", "Cleaning failed.")

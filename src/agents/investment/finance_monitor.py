@@ -101,11 +101,21 @@ class FinanceMonitorAgent(BaseAgent):
                 is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
                 
                 if not is_seen or "🚨" in clean_md:
-                    # 3.2 向量化与实体提取 (AI)
+                    # 3.2 向量化与实体提取 (AI) - 增加 60s 超时
                     self.logger.info(f"[{idx+1}/{total_blocks}] Vectorizing and extracting entities...")
                     loop = asyncio.get_event_loop()
-                    embedding = await loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md))
-                    entities = await loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md))
+                    try:
+                        embedding = await asyncio.wait_for(
+                            loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)),
+                            timeout=60
+                        )
+                        entities = await asyncio.wait_for(
+                            loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)),
+                            timeout=60
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.warning(f"[{idx+1}/{total_blocks}] AI calls timed out for {name}. Proceeding with empty metadata.")
+                        embedding, entities = None, []
                     
                     # 3.3 存储
                     if embedding:
@@ -151,9 +161,16 @@ class FinanceMonitorAgent(BaseAgent):
         语言：中文。格式：Markdown。
         """
         
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, lambda: self.orchestrator.chat(analysis_prompt, []))
-        digest_text = self.orchestrator.process_response(response).get("content", "Analysis failed.")
+        try:
+            loop = asyncio.get_event_loop()
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self.orchestrator.chat(analysis_prompt, [])),
+                timeout=90
+            )
+            digest_text = self.orchestrator.process_response(response).get("content", "Analysis failed.")
+        except asyncio.TimeoutError:
+            self.logger.error("Final digest generation timed out.")
+            digest_text = "分析超时，请查看原始分源文件。"
 
         if "暂无重大新变动" in digest_text:
             return AgentResult(status="SUCCESS", message="No significant new changes.")

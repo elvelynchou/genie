@@ -115,13 +115,16 @@ async def safe_send_message(message_or_id, text: str):
     target_id = message_or_id.chat.id if hasattr(message_or_id, 'chat') else message_or_id
     CHUNK_SIZE = 3500
     chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
-    for chunk in chunks:
+    logger.info(f"Sending message to {target_id} in {len(chunks)} chunks...")
+    for i, chunk in enumerate(chunks):
         try:
             await bot.send_message(target_id, chunk, parse_mode="Markdown")
+            logger.info(f"Chunk {i+1}/{len(chunks)} sent.")
         except Exception as e:
-            logger.warning(f"Markdown send failed, retrying chunk as plain text: {e}")
+            logger.warning(f"Markdown chunk {i+1} failed, falling back: {e}")
             try:
                 await bot.send_message(target_id, chunk, parse_mode=None)
+                logger.info(f"Chunk {i+1}/{len(chunks)} sent as plain text.")
             except Exception as e2:
                 logger.error(f"Failed to send chunk: {e2}")
         await asyncio.sleep(0.5)

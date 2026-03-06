@@ -55,20 +55,21 @@ class SchedulerManager:
         """Safe message sending with chunking and robust error handling."""
         if not text: return
         
-        CHUNK_SIZE = 3500 # Slightly smaller to be safe
-        # 移除可能引起解析错误的转义，完全依赖 fallback 机制
+        CHUNK_SIZE = 3500
         chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
+        logger.info(f"Sending message in {len(chunks)} chunks...")
         
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
             try:
                 await self.bot.send_message(self.admin_chat_id, chunk, parse_mode="Markdown")
+                logger.info(f"Chunk {i+1}/{len(chunks)} sent successfully.")
             except Exception as e:
-                logger.warning(f"Markdown send failed, retrying chunk as plain text: {e}")
+                logger.warning(f"Chunk {i+1} Markdown failed, retrying as plain text: {e}")
                 try:
                     await self.bot.send_message(self.admin_chat_id, chunk, parse_mode=None)
+                    logger.info(f"Chunk {i+1}/{len(chunks)} sent as plain text.")
                 except Exception as e2:
-                    logger.error(f"Failed to send chunk even as plain text: {e2}")
-            # 增加微小延迟，防止触发 Telegram 频率限制
+                    logger.error(f"Chunk {i+1} failed completely: {e2}")
             await asyncio.sleep(0.5)
 
     async def half_hourly_finance_report(self):
