@@ -175,14 +175,18 @@ async def cmd_x_login(message: types.Message):
 @dp.message(Command("x_post"))
 async def cmd_x_post(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    content = message.text.replace("/x_post", "").strip()
-    if not content:
-        await message.answer("Usage: `/x_post 内容`", parse_mode="Markdown")
+    raw_text = message.text.replace("/x_post", "").strip()
+    if not raw_text:
+        await message.answer("Usage: `/x_post [打开窗口] 内容`", parse_mode="Markdown")
         return
-    status = await message.answer("🐦 正在通过自动化流水线发布推文...")
+    
+    # 智能判断是否需要 GUI
+    use_headless = False if any(kw in raw_text.lower() for kw in ["打开窗口", "gui", "window"]) else True
+    content = raw_text.replace("打开窗口", "").replace("gui", "").replace("window", "").strip()
+
+    status = await message.answer(f"🐦 正在发布推文 (Headless: {use_headless})...")
     agent = registry.get_agent("xpub")
-    # 默认使用 geclibot_profile，且发布时建议 headless 以保证稳定
-    result = await agent.execute(str(message.chat.id), content=content, profile="geclibot_profile", headless=True)
+    result = await agent.execute(str(message.chat.id), content=content, profile="geclibot_profile", headless=use_headless)
     await status.delete()
     if result.status == "SUCCESS":
         await message.answer(f"✅ 推文发布成功！\n\n内容预览：\n{content}")

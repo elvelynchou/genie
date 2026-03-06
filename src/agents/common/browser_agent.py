@@ -396,6 +396,14 @@ class BrowserAgent(BaseAgent):
             logs.append({"step": f"action_{i+1}", "action": action})
         return results
 
+    def _expand_selector(self, selector: str) -> str:
+        """智能化选择器转换：将语义 ID 转换为 data-testid 选择器"""
+        if not selector: return selector
+        # 如果不是标准的 CSS 选择器且不包含特殊字符，认为是 X 的 data-testid
+        if all(c not in selector for c in ['[', ']', '#', '.', '>', ' ']):
+            return f"[data-testid='{selector}']"
+        return selector
+
     async def _execute_camoufox_actions(self, page, actions, chat_id, profile, logs):
         """Action executor for camoufox (playwright-based)."""
         results = []
@@ -408,8 +416,12 @@ class BrowserAgent(BaseAgent):
             p = item.get("params", {})
             if not isinstance(p, dict): p = {}
             effective_params = {**item, **p}
+            
+            # 预处理：智能扩展选择器
+            selector = effective_params.get("selector")
+            expanded_selector = self._expand_selector(selector) if selector else None
 
-            self.logger.info(f"Executing Camoufox action {i+1}: {action} with params {effective_params}")
+            self.logger.info(f"Executing Camoufox action {i+1}: {action} with selector {expanded_selector}")
 
             if action == "goto":
                 url = effective_params.get("url")
@@ -429,7 +441,6 @@ class BrowserAgent(BaseAgent):
                 except Exception as e:
                     self.logger.warning(f"Camoufox: Failed to inject semantic proxy: {e}")
             elif action == "click" or action == "hover":
-                selector = effective_params.get("selector")
                 text = effective_params.get("text")
                 
                 # 优先尝试使用原生语义代理
@@ -443,8 +454,8 @@ class BrowserAgent(BaseAgent):
                 except: pass
 
                 elem = None
-                if selector:
-                    elem = await page.wait_for_selector(selector)
+                if expanded_selector:
+                    elem = await page.wait_for_selector(expanded_selector)
                 elif text:
                     elem = await page.get_by_text(text).first
                 
@@ -464,7 +475,6 @@ class BrowserAgent(BaseAgent):
                 else:
                     raise ValueError(f"Element not found for {action}")
             elif action == "type":
-                selector = effective_params.get("selector")
                 text = str(effective_params.get("text", ""))
                 
                 # 优先尝试使用原生语义代理聚焦
@@ -474,8 +484,8 @@ class BrowserAgent(BaseAgent):
                         await page.evaluate(f"window.GenieBridge ? window.GenieBridge.semanticType('{query}') : false")
                 except: pass
 
-                if selector:
-                    await page.focus(selector)
+                if expanded_selector:
+                    await page.focus(expanded_selector)
                     # 使用统一的人类打字模拟引擎
                     async def fox_type(c): await page.keyboard.type(c)
                     async def fox_backspace(): await page.keyboard.press("Backspace")
