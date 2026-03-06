@@ -43,20 +43,36 @@ class SchedulerManager:
             return
 
         logger.info("Starting scheduled finance monitoring...")
+        status_msg = await self.bot.send_message(self.admin_chat_id, "🔍 正在启动自动财经监控 (正在抓取多路源)...")
         
         monitor = registry.get_agent("finance_monitor")
-        # 模拟 Telegram 消息环境，但在后台静默执行
-        # 注意：Agent 内部会自动调用 file_sender 和存储 RAG
-        result = await monitor.execute(self.admin_chat_id)
         
-        if result.status == "SUCCESS":
-            if "No new content" in result.message:
-                logger.info("Finance monitor: No new content found. Staying silent.")
+        # 增加心跳提示
+        async def heartbeat():
+            count = 0
+            while True:
+                await asyncio.sleep(20); count += 1
+                try: await self.bot.edit_message_text(f"⏳ 财经监控执行中 ({count*20}s)...", chat_id=self.admin_chat_id, message_id=status_msg.message_id)
+                except: pass
+        
+        hb = asyncio.create_task(heartbeat())
+        try:
+            result = await monitor.execute(self.admin_chat_id)
+            hb.cancel()
+            await self.bot.delete_message(self.admin_chat_id, status_msg.message_id)
+            
+            if result.status == "SUCCESS":
+                if "No new content" in result.message or "No significant new changes" in result.message:
+                    logger.info("Finance monitor: No significant new changes. Staying silent.")
+                else:
+                    report_text = result.data.get("report", "")
+                    await self.bot.send_message(self.admin_chat_id, f"📊 **财经自动快报 (30m)**：\n\n{report_text}")
             else:
-                report_text = result.data.get("report", "")
-                await self.bot.send_message(self.admin_chat_id, f"📊 **财经自动快报 (30m)**：\n\n{report_text}")
-        else:
-            logger.error(f"Scheduled finance monitor failed: {result.errors}")
+                logger.error(f"Scheduled finance monitor failed: {result.errors}")
+                await self.bot.send_message(self.admin_chat_id, f"❌ 财经监控执行失败: {result.errors}")
+        except Exception as e:
+            hb.cancel()
+            logger.error(f"Finance report task crashed: {e}")
 
     async def daily_github_report(self, send_raw_files: bool = False):
         """执行每日科技趋势分析流"""

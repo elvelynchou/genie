@@ -79,34 +79,36 @@ class FinanceMonitorAgent(BaseAgent):
         generated_files = []
         date_str = datetime.now().strftime("%Y%m%d_%H%M")
 
-        # 将提取到的数据块与来源名称匹配
-        for idx, raw_text in enumerate(semantic_data_blocks):
-            if idx >= len(source_order): break
+        # 3. 并行处理清洗与存储
+        async def process_single_source(idx, raw_text):
+            if idx >= len(source_order): return None
             name = source_order[idx]
             
-            # 调用清洗器
-            clean_res = await cleaner.run(params=cleaner.input_schema(raw_text=raw_text, source_name=name), chat_id=chat_id)
-            
-            if clean_res.status == "SUCCESS":
-                clean_md = clean_res.data["clean_md"]
+            try:
+                # 调用清洗器
+                clean_res = await cleaner.run(params=cleaner.input_schema(raw_text=raw_text, source_name=name), chat_id=chat_id)
+                if clean_res.status != "SUCCESS": return None
                 
-                # 去重校验
+                clean_md = clean_res.data["clean_md"]
                 item_hash = hashlib.md5(clean_md.encode()).hexdigest()
                 is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
                 
                 if not is_seen or "🚨" in clean_md:
-                    # 保存 Source MD
+                    # 并行执行 Embedding 和 实体提取
+                    loop = asyncio.get_event_loop()
+                    tasks = [
+                        loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)),
+                        loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md))
+                    ]
+                    embedding, entities = await asyncio.gather(*tasks)
+                    
+                    # 保存文件
                     os.makedirs(self.SOURCE_DIR, exist_ok=True)
                     file_path = os.path.join(self.SOURCE_DIR, f"{name}_{date_str}.md")
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(f"# {name} - {date_str}\n\n{clean_md}")
-                    generated_files.append(file_path)
                     
-                    # 6. Store to RAG (with Entity Extraction for Graph-RAG)
-                    loop = asyncio.get_event_loop()
-                    embedding = await loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md))
-                    entities = await loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md))
-
+                    # 存入 RAG
                     if embedding:
                         await self.redis_mgr.store_vector(
                             doc_id=f"fin_{name}_{date_str}_{chat_id}",
@@ -114,10 +116,24 @@ class FinanceMonitorAgent(BaseAgent):
                             content=f"Source: {name} | Date: {date_str}\n{clean_md}",
                             entities=entities
                         )
-
-                    digest_payload += f"\n--- {name} ---\n{clean_md}\n"
+                    
                     self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
                     self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
+                    return {"name": name, "md": clean_md, "path": file_path}
+            except Exception as e:
+                self.logger.error(f"Error processing {name}: {e}")
+            return None
+
+        # 启动并行任务
+        self.logger.info(f"Processing {len(semantic_data_blocks)} blocks in parallel...")
+        process_tasks = [process_single_source(i, text) for i, text in enumerate(semantic_data_blocks)]
+        processed_results = await asyncio.gather(*process_tasks)
+
+        # 汇总结果
+        for res in processed_results:
+            if res:
+                digest_payload += f"\n--- {res['name']} ---\n{res['md']}\n"
+                generated_files.append(res['path'])
 
         if not digest_payload:
             return AgentResult(status="SUCCESS", message="No new or significant content found.")
