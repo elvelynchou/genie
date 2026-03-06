@@ -20,12 +20,28 @@ class SchedulerManager:
         self.admin_chat_id = admin_chat_id
 
     def start(self):
-        # 北京时间每天 10:00
+        # 北京时间每天 10:00 科技报告
         self.scheduler.add_job(self.daily_github_report, 'cron', hour=10, minute=0)
         # 每隔 30 分钟执行一次财经监控
         self.scheduler.add_job(self.half_hourly_finance_report, 'interval', minutes=30)
+        # 北京时间每天凌晨 03:00 执行离线梦境 (记忆巩固)
+        self.scheduler.add_job(self.nightly_dreaming_phase, 'cron', hour=3, minute=0)
         self.scheduler.start()
-        logger.info("Scheduler started. Daily GitHub report (10:00) and Finance Monitor (30m) active.")
+        logger.info("Scheduler started. Daily Jobs: GitHub (10:00), Dreaming (03:00). Interval: Finance (30m).")
+
+    async def nightly_dreaming_phase(self):
+        """凌晨执行离线梦境：巩固记忆碎片"""
+        if not self.admin_chat_id: return
+        logger.info("Starting nightly Dreaming Phase...")
+        dreamer = registry.get_agent("dreamer")
+        result = await dreamer.execute(self.admin_chat_id, chat_id=self.admin_chat_id)
+        if result.status == "SUCCESS":
+            logger.info("Nightly dreaming complete.")
+            # 只有在有新发现时才打扰用户（可选，也可设为完全静默）
+            if "No new patterns" not in result.message:
+                await self.bot.send_message(self.admin_chat_id, "🌙 **离线梦境报告**：昨夜我已完成记忆巩固，提炼了新的宏观策略与逻辑。")
+        else:
+            logger.error(f"Nightly dreaming failed: {result.errors}")
 
     async def half_hourly_finance_report(self):
         """执行半小时一次的财经自动监控"""

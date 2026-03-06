@@ -175,6 +175,29 @@ class RedisManager:
             self.logger.error(f"Entity search failed: {e}")
             return []
 
+    async def get_all_by_depth(self, depth: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """Fetch all documents at a specific depth layer."""
+        if not self.rag_enabled: return []
+        query = f"@depth:[{depth} {depth}]"
+        try:
+            res = self.client.execute_command("FT.SEARCH", self.index_name, query, "LIMIT", "0", str(limit), "DIALECT", "2")
+            results = []
+            if res and res[0] > 0:
+                for i in range(2, len(res), 2):
+                    doc_id = res[i-1] # Actually the index before the fields
+                    fields = res[i]
+                    data = {"id": doc_id.decode('utf-8') if isinstance(doc_id, bytes) else str(doc_id)}
+                    for j in range(0, len(fields), 2):
+                        key = fields[j].decode('utf-8')
+                        val = fields[j+1]
+                        if key != "vector": # Skip large binary vector
+                            data[key] = val.decode('utf-8') if isinstance(val, bytes) else val
+                    results.append(data)
+            return results
+        except Exception as e:
+            self.logger.error(f"Fetch by depth failed: {e}")
+            return []
+
     async def search_vector(self, query_vector: List[float], k: int = 3) -> List[str]:
         if not self.rag_enabled: return []
         vector_bin = np.array(query_vector, dtype=np.float32).tobytes()

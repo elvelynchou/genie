@@ -26,6 +26,7 @@ from agents.analyzer.memory_refiner import MemoryRefinerAgent
 from agents.investment.finance_monitor import FinanceMonitorAgent
 from agents.investment.finance_cleaner import FinanceCleanerAgent
 from agents.socialpub.xpub_agent import XPubAgent
+from agents.analyzer.dreamer_agent import DreamerAgent
 from agents.common.gemini_cli_agent import GeminiCLIAgent
 from agents.common.browser_agent import BrowserAgent
 from agents.imgtools.image_ocr import ImageOCRAgent
@@ -78,6 +79,7 @@ registry.register_agent(LogAnchorAgent(orchestrator=orchestrator))
 registry.register_agent(FinanceMonitorAgent(orchestrator=orchestrator, redis_mgr=redis_mgr))
 registry.register_agent(FinanceCleanerAgent(orchestrator=orchestrator))
 registry.register_agent(XPubAgent(orchestrator=orchestrator))
+registry.register_agent(DreamerAgent(orchestrator=orchestrator, redis_mgr=redis_mgr))
 registry.register_agent(GeminiCLIAgent())
 registry.register_agent(BrowserAgent())
 registry.register_agent(ImageOCRAgent(orchestrator=orchestrator))
@@ -117,12 +119,12 @@ async def safe_send_message(message_or_id, text: str):
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    await message.reply("GenieBot Bridge-03 Phase 4 Active.\nAdvanced Social Publication: ONLINE")
+    await message.reply("GenieBot Bridge-03 Phase 4 Active.\nAdvanced Memory Consolidation: ONLINE")
 
 @dp.message(Command("run_report"))
 async def trigger_report(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    await message.answer("🚀 手动触发每日 GitHub 趋势报告流...")
+    await message.answer("🚀 手动触发每日科技趋势报告流...")
     asyncio.create_task(scheduler_mgr.daily_github_report())
 
 @dp.message(Command("run_finance"))
@@ -130,6 +132,18 @@ async def trigger_finance(message: types.Message):
     if not await is_allowed(message.from_user.id): return
     await message.answer("🚀 手动触发半小时财经监控流...")
     asyncio.create_task(scheduler_mgr.half_hourly_finance_report())
+
+@dp.message(Command("dream"))
+async def cmd_dream(message: types.Message):
+    if not await is_allowed(message.from_user.id): return
+    status = await message.answer("🌙 正在开启“离线梦境”模式，深度巩固记忆...")
+    agent = registry.get_agent("dreamer")
+    result = await agent.execute(str(message.chat.id), chat_id=str(message.chat.id))
+    await status.delete()
+    if result.status == "SUCCESS":
+        await message.answer(f"✅ 梦境进化完毕！\n\n{result.message}")
+    else:
+        await message.answer(f"❌ 梦境中断: {result.errors}")
 
 @dp.message(Command("anchor"))
 async def cmd_anchor(message: types.Message):
@@ -160,7 +174,6 @@ async def cmd_x_login(message: types.Message):
     if not await is_allowed(message.from_user.id): return
     args = message.text.replace("/x_login", "").strip()
     profile = args if args else "geclibot_profile"
-    # 强制开启 Chrome (Nodriver) 窗口进行登录
     await message.answer(f"🌐 正在开启 Chrome (Nodriver) 窗口进行 Profile [{profile}] 登录...")
     agent = registry.get_agent("stealth_browser")
     asyncio.create_task(agent.execute(
@@ -181,9 +194,7 @@ async def cmd_x_post(message: types.Message):
         return
     
     use_headless = False if any(kw in raw_text.lower() for kw in ["打开窗口", "gui", "window"]) else True
-    # 发推默认必须使用 nodriver (Chrome) 以匹配登录态
     use_engine = "nodriver"
-    
     content = raw_text.replace("打开窗口", "").replace("gui", "").replace("window", "").strip()
 
     status = await message.answer(f"🐦 正在通过 Chrome (Nodriver) 发布推文 (Headless: {use_headless})...")
@@ -322,13 +333,10 @@ async def handle_message(message: types.Message, forced_input: str = None):
         keep_open_val = "True" if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]) else "False"
         profile_match = re.search(r'使用([\w_]+)profile', user_input.replace(" ", ""))
         target_profile = profile_match.group(1) if profile_match else "default"
-        
-        # 核心逻辑：如果是处理 X 发布或包含 Chrome 关键词，必须使用 nodriver (Chrome)
         if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "x.com", "推特", "twitter", "xpub"]):
             engine_val = "nodriver"
         else:
             engine_val = "camoufox"
-            
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='{engine_val}', headless={headless_val}, profile='{target_profile}', and keep_open={keep_open_val}. Actions: 1. goto {target_url}, 2. extract_semantic."
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
@@ -385,31 +393,22 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 
                 # 修复逻辑：物理级参数纠偏
                 if agent_name == "stealth_browser" or agent_name == "xpub":
-                    # 1. 强制纠正引擎
                     if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver", "推特", "x.com"]):
                         agent_args["engine"] = "nodriver"
                     else:
-                        # 只有在完全没提到 Chrome 且不是社交任务时，才允许 camoufox
-                        if agent_name != "xpub":
-                            agent_args["engine"] = "camoufox"
-                        else:
-                            agent_args["engine"] = "nodriver" # 发推强制 Chrome
+                        if agent_name != "xpub": agent_args["engine"] = "camoufox"
+                        else: agent_args["engine"] = "nodriver"
 
-                    # 2. 强制纠正 Headless 状态
                     if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]):
                         agent_args["headless"] = False
                     
-                    # 3. 强制纠正 Keep Open 状态
                     if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]):
                         agent_args["keep_open"] = True
                         agent_args["headless"] = False
                     
-                    # 4. 动态 Profile 识别
                     if "profile" not in agent_args or agent_args["profile"] == "default":
-                        if "geclibot_profile" in user_input:
-                            agent_args["profile"] = "geclibot_profile"
+                        if "geclibot_profile" in user_input: agent_args["profile"] = "geclibot_profile"
                     
-                    # 5. 修复 Actions (仅限 stealth_browser)
                     if agent_name == "stealth_browser" and "actions" in agent_args:
                         agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
                         if not agent_args["actions"]:
@@ -439,12 +438,12 @@ async def handle_message(message: types.Message, forced_input: str = None):
                             await finalize_nanobanana_output(chat_id, result.data, message)
                             if is_image_task or is_video_task or is_report_task or is_browse_task:
                                 if is_report_task and "report" in result.data: await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
-                                logger.info("Nanobanana/Report/Browse finalized."); await message.answer("✅ 任务执行完毕。"); break
+                                await message.answer("✅ 任务执行完毕。"); break
                         else:
                             await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
                             if is_report_task and "report" in result.data: await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
                             if is_image_task or is_video_task or is_report_task or is_browse_task:
-                                logger.info("File/Report/Browse sent."); await message.answer("✅ 任务执行完毕。"); break
+                                await message.answer("✅ 任务执行完毕。"); break
                     
                     if is_browse_task:
                         extracted = result.data.get("page_content", "")
