@@ -43,6 +43,31 @@ class SchedulerManager:
         else:
             logger.error(f"Nightly dreaming failed: {result.errors}")
 
+    async def _safe_send(self, text: str):
+        """Safe message sending with chunking and escaping."""
+        if not text: return
+        
+        # Simple escaping for Markdown
+        escape_chars = r'_*`['
+        safe_text = text
+        for char in escape_chars:
+            safe_text = safe_text.replace(char, f"\\{char}")
+            
+        CHUNK_SIZE = 4000
+        chunks = [safe_text[i:i + CHUNK_SIZE] for i in range(0, len(safe_text), CHUNK_SIZE)]
+        
+        for chunk in chunks:
+            try:
+                await self.bot.send_message(self.admin_chat_id, chunk, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning(f"Markdown send failed, retrying without parse_mode: {e}")
+                try:
+                    # Retry raw if markdown fails
+                    raw_chunk = text[safe_text.find(chunk):safe_text.find(chunk)+len(chunk)]
+                    await self.bot.send_message(self.admin_chat_id, raw_chunk[:4000], parse_mode=None)
+                except:
+                    pass
+
     async def half_hourly_finance_report(self):
         """执行半小时一次的财经自动监控"""
         if not self.admin_chat_id:
@@ -66,20 +91,22 @@ class SchedulerManager:
         
         try:
             result = await monitor.execute(self.admin_chat_id)
-            await self.bot.delete_message(self.admin_chat_id, status_msg.message_id)
+            try:
+                await self.bot.delete_message(self.admin_chat_id, status_msg.message_id)
+            except: pass
             
             if result.status == "SUCCESS":
                 if "No new content" in result.message or "No significant new changes" in result.message:
                     logger.info("Finance monitor: No significant new changes. Staying silent.")
                 else:
                     report_text = result.data.get("report", "")
-                    await self.bot.send_message(self.admin_chat_id, f"📊 **财经自动快报 (30m)**：\n\n{report_text}")
+                    header = "📊 **财经自动快报 (30m)**：\n\n"
+                    await self._safe_send(header + report_text)
             else:
                 logger.error(f"Scheduled finance monitor failed: {result.errors}")
-                await self.bot.send_message(self.admin_chat_id, f"❌ 财经监控执行失败: {result.errors}")
+                await self.bot.send_message(self.admin_chat_id, f"❌ 财经监控执行失败: {result.errors[:500]}")
         except Exception as e:
-            hb.cancel()
-            logger.error(f"Finance report task crashed: {e}")
+            logger.error(f"Finance report task crashed: {e}", exc_info=True)
 
     async def daily_github_report(self, send_raw_files: bool = False):
         """执行每日科技趋势分析流"""
@@ -135,7 +162,7 @@ class SchedulerManager:
                 
                 # 发送文字总结
                 title = "📑 **每日趋势总结**" if target == "general" else "🚀 **项目进化建议**"
-                await self.bot.send_message(self.admin_chat_id, f"{title}\n\n{report_text}")
+                await self._safe_send(f"{title}\n\n{report_text}")
                 
                 # 记录分析结果文件到 Redis state，但不立即发送，除非需要备份
                 # await file_sender.execute(self.admin_chat_id, file_path=report_file, delete_after_send=False)
