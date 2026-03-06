@@ -255,14 +255,10 @@ class BrowserAgent(BaseAgent):
                 os.environ["DISPLAY"] = os.getenv("DISPLAY", ":20.0")
                 os.environ["XAUTHORITY"] = os.getenv("XAUTHORITY", "/home/elvelyn/.Xauthority")
 
-            # 使用真实的指纹
-            fp = self.fingerprint_gen.generate(browser="firefox", os="windows")
-
+            # 核心修复：不再手动注入指纹对象，让 Camoufox 内部自动处理
             async with AsyncCamoufox(
                 headless=params.headless,
-                human=True,
-                screen=fp.screen,
-                headers=fp.headers
+                human=True
             ) as browser:
                 page = await browser.new_page()
                 results_data = await self._execute_camoufox_actions(page, params.actions, chat_id, params.profile, logs)
