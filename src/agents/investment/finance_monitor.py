@@ -68,40 +68,41 @@ class FinanceMonitorAgent(BaseAgent):
         results = res.data.get("results", [])
         semantic_data_blocks = [r["data"] for r in results if r.get("type") == "semantic_tree"]
         
-        if len(semantic_data_blocks) == 0:
+        total_blocks = len(semantic_data_blocks)
+        if total_blocks == 0:
             return AgentResult(status="SUCCESS", message="No content extracted from any source.")
 
+        self.logger.info(f"Browser finished. Now processing {total_blocks} source blocks...")
         digest_payload = ""
         generated_files = []
         date_str = datetime.now().strftime("%Y%m%d_%H%M")
 
-        # 顺序处理以保证稳定性，避免并行 API 调用导致的 potential is_set 冲突
+        # 顺序处理
         for idx, raw_text in enumerate(semantic_data_blocks):
             if idx >= len(source_order): break
             name = source_order[idx]
+            self.logger.info(f"[{idx+1}/{total_blocks}] Processing source: {name} (Text len: {len(raw_text)})")
             
             try:
-                # 调用清洗器
+                # 3.1 清洗 (AI)
+                self.logger.info(f"[{idx+1}/{total_blocks}] Cleaning text via Gemini...")
                 clean_res = await cleaner.run(params=cleaner.input_schema(raw_text=raw_text, source_name=name), chat_id=chat_id)
-                if clean_res.status != "SUCCESS": continue
+                if clean_res.status != "SUCCESS": 
+                    self.logger.warning(f"Cleaning failed for {name}: {clean_res.errors}")
+                    continue
                 
                 clean_md = clean_res.data["clean_md"]
                 item_hash = hashlib.md5(clean_md.encode()).hexdigest()
                 is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
                 
                 if not is_seen or "🚨" in clean_md:
-                    # 顺序获取 Embedding 和 实体
+                    # 3.2 向量化与实体提取 (AI)
+                    self.logger.info(f"[{idx+1}/{total_blocks}] Vectorizing and extracting entities...")
                     loop = asyncio.get_event_loop()
                     embedding = await loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md))
                     entities = await loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md))
                     
-                    # 保存文件
-                    os.makedirs(self.SOURCE_DIR, exist_ok=True)
-                    file_path = os.path.join(self.SOURCE_DIR, f"{name}_{date_str}.md")
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(f"# {name} - {date_str}\n\n{clean_md}")
-                    
-                    # 存入 RAG
+                    # 3.3 存储
                     if embedding:
                         await self.redis_mgr.store_vector(
                             doc_id=f"fin_{name}_{date_str}_{chat_id}",
@@ -112,16 +113,27 @@ class FinanceMonitorAgent(BaseAgent):
                         )
                     
                     digest_payload += f"\n--- {name} ---\n{clean_md}\n"
+                    
+                    # 保存原始文件
+                    os.makedirs(self.SOURCE_DIR, exist_ok=True)
+                    file_path = os.path.join(self.SOURCE_DIR, f"{name}_{date_str}.md")
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(f"# {name} - {date_str}\n\n{clean_md}")
                     generated_files.append(file_path)
+
                     self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
                     self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
+                    self.logger.info(f"[{idx+1}/{total_blocks}] {name} saved and indexed.")
+                else:
+                    self.logger.info(f"[{idx+1}/{total_blocks}] {name} duplicate. Skipping.")
             except Exception as e:
                 self.logger.error(f"Error processing {name}: {e}")
 
         if not digest_payload:
-            return AgentResult(status="SUCCESS", message="No new or significant content found.")
+            return AgentResult(status="SUCCESS", message="No new content found after analysis.")
 
         # 4. 生成对比简报
+        self.logger.info("Generating final contextual digest...")
         last_report = self.redis_mgr.client.get(f"last_finance_digest:{chat_id}")
         last_report_text = last_report.decode('utf-8') if last_report else "无上期报告。"
 
