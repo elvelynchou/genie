@@ -20,6 +20,9 @@ class SchedulerManager:
         self.admin_chat_id = admin_chat_id
 
     def start(self):
+        if self.scheduler.running:
+            logger.info("Scheduler is already running.")
+            return
         # 北京时间每天 10:00 科技报告
         self.scheduler.add_job(self.daily_github_report, 'cron', hour=10, minute=0)
         # 每隔 30 分钟执行一次财经监控
@@ -28,6 +31,11 @@ class SchedulerManager:
         self.scheduler.add_job(self.nightly_dreaming_phase, 'cron', hour=3, minute=0)
         self.scheduler.start()
         logger.info("Scheduler started. Daily Jobs: GitHub (10:00), Dreaming (03:00). Interval: Finance (30m).")
+
+    def shutdown(self):
+        if self.scheduler.running:
+            self.scheduler.shutdown()
+            logger.info("Scheduler shut down.")
 
     async def nightly_dreaming_phase(self):
         """凌晨执行离线梦境：巩固记忆碎片"""

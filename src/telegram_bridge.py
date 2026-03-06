@@ -45,8 +45,17 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 ALLOWED_USERS = [u.strip() for u in os.getenv("ALLOWED_USERS", "").split(",") if u.strip()]
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with file support
+log_file = "/etc/myapp/genie/logs/bot.log"
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Initialize components
@@ -373,7 +382,11 @@ async def handle_message(message: types.Message, forced_input: str = None):
         try:
             loop = asyncio.get_event_loop()
             force_tool = force_tool_for_first_round if i == 0 else None
-            response = await loop.run_in_executor(None, lambda: orchestrator.chat(loop_input, history, summary=summary, tools=available_tools, force_tool_name=force_tool))
+            # 增加硬超时
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: orchestrator.chat(loop_input, history, summary=summary, tools=available_tools, force_tool_name=force_tool)),
+                timeout=90
+            )
             processed = orchestrator.process_response(response)
 
             if processed["type"] == "error":
@@ -484,6 +497,9 @@ async def main():
             await dp.start_polling(bot)
         except Exception as e:
             logger.error(f"Bot crashed with error: {e}. Restarting in 10 seconds...", exc_info=True)
+            try:
+                scheduler_mgr.shutdown()
+            except: pass
             await asyncio.sleep(10)
 
 if __name__ == "__main__":
