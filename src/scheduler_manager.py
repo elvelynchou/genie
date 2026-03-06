@@ -72,23 +72,24 @@ class SchedulerManager:
                     logger.error(f"Chunk {i+1} failed completely: {e2}")
             await asyncio.sleep(0.5)
 
-    async def half_hourly_finance_report(self):
+    async def half_hourly_finance_report(self, is_manual: bool = False):
         """执行半小时一次的财经自动监控"""
         if not self.admin_chat_id:
             logger.error("ADMIN_CHAT_ID not set.")
             return
 
-        # 时间排除逻辑：北京时间 23:30 - 07:30 不运行
-        now = datetime.now(self.tz)
-        current_time = now.time()
-        start_silent = datetime.strptime("23:30", "%H:%M").time()
-        end_silent = datetime.strptime("07:30", "%H:%M").time()
+        # 时间排除逻辑：仅针对非手动触发的任务执行静默
+        if not is_manual:
+            now = datetime.now(self.tz)
+            current_time = now.time()
+            start_silent = datetime.strptime("23:30", "%H:%M").time()
+            end_silent = datetime.strptime("07:30", "%H:%M").time()
 
-        if current_time >= start_silent or current_time <= end_silent:
-            logger.info(f"Finance monitor suppressed during silent hours ({now.strftime('%H:%M')})")
-            return
+            if current_time >= start_silent or current_time <= end_silent:
+                logger.info(f"Finance monitor suppressed during silent hours ({now.strftime('%H:%M')})")
+                return
 
-        logger.info("Starting scheduled finance monitoring...")
+        logger.info(f"Starting finance monitoring (Manual: {is_manual})...")
         status_msg = await self.bot.send_message(self.admin_chat_id, "🔍 正在启动自动财经监控 (正在抓取多路源)...")
         
         monitor = registry.get_agent("finance_monitor")

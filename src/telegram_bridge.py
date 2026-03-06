@@ -143,8 +143,9 @@ async def trigger_report(message: types.Message):
 @dp.message(Command("run_finance"))
 async def trigger_finance(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    await message.answer("🚀 手动触发半小时财经监控流...")
-    asyncio.create_task(scheduler_mgr.half_hourly_finance_report())
+    await message.answer("🚀 手动触发半小时财经监控流 (无视静默期)...")
+    # 传递 is_manual=True
+    asyncio.create_task(scheduler_mgr.half_hourly_finance_report(is_manual=True))
 
 @dp.message(Command("dream"))
 async def cmd_dream(message: types.Message):
