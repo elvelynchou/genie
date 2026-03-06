@@ -24,6 +24,11 @@
       "name": "BBC_Business",
       "url": "https://www.bbc.com/business",
       "category": "business"
+    },
+    {
+      "name": "FT_Markets",
+      "url": "https://www.ft.com/markets",
+      "category": "markets"
     }
   ]
 }

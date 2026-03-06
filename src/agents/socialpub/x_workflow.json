@@ -1,0 +1,39 @@
+{
+  "workflows": {
+    "post_tweet": [
+      {
+        "step": "navigate",
+        "action": "goto",
+        "params": { "url": "https://x.com/compose/post" }
+      },
+      {
+        "step": "wait_for_input",
+        "action": "wait",
+        "params": { "seconds": 5 }
+      },
+      {
+        "step": "focus_and_type",
+        "action": "type",
+        "params": { 
+          "selector": "[data-testid='tweetTextarea_0']",
+          "text": "{content}"
+        }
+      },
+      {
+        "step": "wait_before_post",
+        "action": "wait",
+        "params": { "seconds": 2 }
+      },
+      {
+        "step": "click_post",
+        "action": "click",
+        "params": { "selector": "[data-testid='tweetButton']" }
+      },
+      {
+        "step": "confirm_finish",
+        "action": "wait",
+        "params": { "seconds": 3 }
+      }
+    ]
+  }
+}

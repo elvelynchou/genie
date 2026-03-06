@@ -25,6 +25,7 @@ from agents.analyzer.trend_analyzer import TrendAnalyzerAgent
 from agents.analyzer.memory_refiner import MemoryRefinerAgent
 from agents.investment.finance_monitor import FinanceMonitorAgent
 from agents.investment.finance_cleaner import FinanceCleanerAgent
+from agents.socialpub.xpub_agent import XPubAgent
 from agents.common.gemini_cli_agent import GeminiCLIAgent
 from agents.common.browser_agent import BrowserAgent
 from agents.imgtools.image_ocr import ImageOCRAgent
@@ -61,9 +62,10 @@ OPERATIONAL DIRECTIVES:
 2. METADATA REPORTING: Always report 'file_path' locations.
 3. IMAGE WORKFLOW: Use 'prompt_inverse' then 'image_template_creator' for templating.
 4. FINANCE PIPELINE: When monitoring finance, the system uses Browser -> Cleaner -> RAG -> Report. 
-5. BROWSER STRATEGY: When using 'stealth_browser' to read a page, you MUST include at least two actions: 1) {"action": "goto", "url": "..."} and 2) {"action": "extract_semantic"}. Without 'extract_semantic', you will receive no data back.
-6. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for X/video, Nanobanana, and Skill tasks.
-7. KNOWLEDGE UTILIZATION: You have access to a Graph-RAG system. Prioritize information labeled [Relevant Past Experiences & Knowledge] to answer queries. ONLY use 'stealth_browser' to search the web if the information in memory is insufficient, or if the user explicitly asks for "latest web search".
+5. SOCIAL PUBLISHING: To post on X (Twitter), use 'xpub'.
+6. BROWSER STRATEGY: When using 'stealth_browser' to read a page, you MUST include at least two actions: 1) {"action": "goto", "url": "..."} and 2) {"action": "extract_semantic"}. Without 'extract_semantic', you will receive no data back.
+7. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for X/video, Nanobanana, and Skill tasks.
+8. KNOWLEDGE UTILIZATION: You have access to a Graph-RAG system. Prioritize information labeled [Relevant Past Experiences & Knowledge] to answer queries. ONLY use 'stealth_browser' to search the web if the information in memory is insufficient, or if the user explicitly asks for "latest web search".
 """
 orchestrator = GeminiOrchestrator(api_key=GEMINI_KEY, system_instruction=system_instruction)
 
@@ -75,6 +77,7 @@ registry.register_agent(MemoryRefinerAgent(orchestrator=orchestrator, redis_mgr=
 registry.register_agent(LogAnchorAgent(orchestrator=orchestrator))
 registry.register_agent(FinanceMonitorAgent(orchestrator=orchestrator, redis_mgr=redis_mgr))
 registry.register_agent(FinanceCleanerAgent(orchestrator=orchestrator))
+registry.register_agent(XPubAgent(orchestrator=orchestrator))
 registry.register_agent(GeminiCLIAgent())
 registry.register_agent(BrowserAgent())
 registry.register_agent(ImageOCRAgent(orchestrator=orchestrator))
@@ -114,7 +117,7 @@ async def safe_send_message(message_or_id, text: str):
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    await message.reply("GenieBot Bridge-03 Phase 4 Active.\nAdvanced Finance Pipeline: ONLINE")
+    await message.reply("GenieBot Bridge-03 Phase 4 Active.\nAdvanced Social Publication: ONLINE")
 
 @dp.message(Command("run_report"))
 async def trigger_report(message: types.Message):
@@ -151,6 +154,40 @@ async def reset_session(message: types.Message):
         asyncio.create_task(registry.get_agent("memory_refiner").execute(chat_id, history=history, session_status="RESET_BY_USER"))
     await redis_mgr.clear_history(chat_id); redis_mgr.client.delete(f"summary:{chat_id}")
     await message.answer("🔄 会话已复盘并重置。")
+
+@dp.message(Command("x_login"))
+async def cmd_x_login(message: types.Message):
+    if not await is_allowed(message.from_user.id): return
+    args = message.text.replace("/x_login", "").strip()
+    profile = args if args else "geclibot_profile"
+    await message.answer(f"🌐 正在为 Profile [{profile}] 开启 X 登录窗口 (保持 15 分钟)...")
+    agent = registry.get_agent("stealth_browser")
+    # 强制开启 GUI 和保持窗口
+    asyncio.create_task(agent.execute(
+        str(message.chat.id), 
+        engine="camoufox", 
+        headless=False, 
+        profile=profile, 
+        keep_open=True,
+        actions=[{"action": "goto", "params": {"url": "https://x.com/login"}}]
+    ))
+
+@dp.message(Command("x_post"))
+async def cmd_x_post(message: types.Message):
+    if not await is_allowed(message.from_user.id): return
+    content = message.text.replace("/x_post", "").strip()
+    if not content:
+        await message.answer("Usage: `/x_post 内容`", parse_mode="Markdown")
+        return
+    status = await message.answer("🐦 正在通过自动化流水线发布推文...")
+    agent = registry.get_agent("xpub")
+    # 默认使用 geclibot_profile，且发布时建议 headless 以保证稳定
+    result = await agent.execute(str(message.chat.id), content=content, profile="geclibot_profile", headless=True)
+    await status.delete()
+    if result.status == "SUCCESS":
+        await message.answer(f"✅ 推文发布成功！\n\n内容预览：\n{content}")
+    else:
+        await message.answer(f"❌ 发布失败: {result.errors}")
 
 def load_template_prompt(prompt_or_template: str) -> str:
     template_path = f"/etc/myapp/genie/src/agents/imgtools/genimgtemplate/{prompt_or_template}.json"
@@ -272,15 +309,11 @@ async def handle_message(message: types.Message, forced_input: str = None):
     elif "http" in user_input.lower() or any(kw in user_input.lower() for kw in ["抓取", "浏览器", "browser", "打开窗口"]):
         url_match = re.search(r'https?://[^\s]+', user_input)
         target_url = url_match.group(0) if url_match else "about:blank"
-        
         headless_val = "False" if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]) else "True"
         keep_open_val = "True" if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]) else "False"
-        
         profile_match = re.search(r'使用([\w_]+)profile', user_input.replace(" ", ""))
         target_profile = profile_match.group(1) if profile_match else "default"
-        
         current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'stealth_browser' with engine='camoufox', headless={headless_val}, profile='{target_profile}', and keep_open={keep_open_val}. Actions: 1. goto {target_url}, 2. extract_semantic."
-        
         filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
         force_tool_for_first_round = "stealth_browser"; is_browse_task = True
     else: current_input = user_input
@@ -335,18 +368,14 @@ async def handle_message(message: types.Message, forced_input: str = None):
             elif processed["type"] == "function_call":
                 agent_name = processed["name"]; agent_args = processed["args"]
                 
-                # 修复逻辑：过滤掉 agent_args 中的 None 动作并尝试修复
+                # 修复逻辑：物理级参数纠偏
                 if agent_name == "stealth_browser":
-                    # 1. 强制纠正 Headless 状态
                     if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]):
                         agent_args["headless"] = False
-                    
-                    # 2. 强制纠正 Keep Open 状态
                     if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]):
                         agent_args["keep_open"] = True
-                        agent_args["headless"] = False # 保持开启通常意味着需要 GUI 操作
+                        agent_args["headless"] = False
                     
-                    # 3. 修复 Actions
                     if "actions" in agent_args:
                         agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
                         if not agent_args["actions"]:
