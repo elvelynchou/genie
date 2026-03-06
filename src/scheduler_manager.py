@@ -100,7 +100,9 @@ class SchedulerManager:
             
             if result.status == "SUCCESS":
                 if "No new content" in result.message or "No significant new changes" in result.message:
-                    logger.info("Finance monitor: No significant new changes. Staying silent.")
+                    logger.info("Finance monitor: No significant new changes.")
+                    if is_manual:
+                        await self.bot.send_message(self.admin_chat_id, "ℹ️ **财经监控完成**：对比上次抓取，暂无重大新增事件。")
                 else:
                     report_text = result.data.get("report", "")
                     await self._safe_send(f"📊 **财经自动快报** (北京时间 {datetime.now(self.tz).strftime('%H:%M')}):\n\n{report_text}")
