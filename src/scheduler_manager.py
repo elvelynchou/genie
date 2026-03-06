@@ -34,7 +34,7 @@ class SchedulerManager:
         if not self.admin_chat_id: return
         logger.info("Starting nightly Dreaming Phase...")
         dreamer = registry.get_agent("dreamer")
-        result = await dreamer.execute(self.admin_chat_id, chat_id=self.admin_chat_id)
+        result = await dreamer.execute(self.admin_chat_id)
         if result.status == "SUCCESS":
             logger.info("Nightly dreaming complete.")
             # 只有在有新发现时才打扰用户（可选，也可设为完全静默）

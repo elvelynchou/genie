@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from agents.base import BaseAgent, AgentResult
 
 class DreamerInput(BaseModel):
-    chat_id: str = Field(..., description="The chat ID to consolidate memory for.")
     depth_to_process: int = Field(2, description="The depth layer to scan (default is Fact layer).")
 
 class DreamerAgent(BaseAgent):

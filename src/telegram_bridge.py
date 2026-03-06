@@ -138,7 +138,7 @@ async def cmd_dream(message: types.Message):
     if not await is_allowed(message.from_user.id): return
     status = await message.answer("🌙 正在开启“离线梦境”模式，深度巩固记忆...")
     agent = registry.get_agent("dreamer")
-    result = await agent.execute(str(message.chat.id), chat_id=str(message.chat.id))
+    result = await agent.execute(str(message.chat.id))
     await status.delete()
     if result.status == "SUCCESS":
         await message.answer(f"✅ 梦境进化完毕！\n\n{result.message}")
@@ -422,6 +422,10 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 agent = registry.get_agent(agent_name)
                 if not agent: current_input = f"Error: Agent {agent_name} not found."; continue
                 logger.info(f"Executing {agent_name} for {chat_id}")
+                
+                # 安全保护：移除可能存在的 chat_id 冲突
+                agent_args.pop("chat_id", None)
+                
                 async def heartbeat():
                     count = 0
                     while True:
