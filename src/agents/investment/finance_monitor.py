@@ -114,7 +114,8 @@ class FinanceMonitorAgent(BaseAgent):
                             doc_id=f"fin_{name}_{date_str}_{chat_id}",
                             vector=embedding,
                             content=f"Source: {name} | Date: {date_str}\n{clean_md}",
-                            entities=entities
+                            entities=entities,
+                            depth=2 # Data Layer
                         )
                     
                     self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)

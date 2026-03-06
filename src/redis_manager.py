@@ -64,38 +64,91 @@ class RedisManager:
 
     # --- L3: Vector / RAG (Now on DB 0) ---
     def init_vector_index(self, dim: int = 768):
-        """Initialize Vector Index with Entity Tagging support."""
+        """Initialize Vector Index with Entity Tagging and Hierarchical Depth support."""
         try:
             self.client.execute_command(
                 "FT.CREATE", self.index_name, "ON", "HASH", "PREFIX", "1", "doc:",
                 "SCHEMA", 
                 "content", "TEXT", 
                 "entities", "TAG", "SEPARATOR", ",",
+                "depth", "NUMERIC", "SORTABLE",
                 "vector", "VECTOR", "HNSW", "6", "TYPE", "FLOAT32", "DIM", str(dim), "DISTANCE_METRIC", "COSINE"
             )
-            self.logger.info(f"Vector index {self.index_name} (with Tags) created on DB 0.")
+            self.logger.info(f"Vector index {self.index_name} (with Tags & Depth) created on DB 0.")
             self.rag_enabled = True
         except redis.exceptions.ResponseError as e:
             if "Index already exists" in str(e):
-                # Optionally check if entities field exists, if not, recreate or alter
                 self.logger.info("Vector index already exists.")
                 self.rag_enabled = True
             else:
                 self.logger.error(f"Failed to create index: {e}")
                 self.rag_enabled = False
 
-    async def store_vector(self, doc_id: str, vector: List[float], content: str, entities: List[str] = None):
+    async def store_vector(self, doc_id: str, vector: List[float], content: str, entities: List[str] = None, depth: int = 2):
+        """
+        Store vector with entities and hierarchical depth.
+        depth: 0=Strategy, 1=Logic, 2=Data (default)
+        """
         if not self.rag_enabled: return
         key = f"doc:{doc_id}"
         vector_bin = np.array(vector, dtype=np.float32).tobytes()
         mapping = {
             "vector": vector_bin,
-            "content": content
+            "content": content,
+            "depth": depth
         }
         if entities:
             mapping["entities"] = ",".join(entities)
             
         self.client.hset(key, mapping=mapping)
+
+    async def search_hierarchical(self, query_vector: List[float], entities: List[str] = None, k_strategy: int = 2, k_data: int = 3) -> List[str]:
+        """
+        Multi-layer search: Prioritizes high-level strategy nodes then combines with detailed data.
+        """
+        if not self.rag_enabled: return []
+        vector_bin = np.array(query_vector, dtype=np.float32).tobytes()
+        
+        results = []
+        try:
+            # 1. Search Strategy Layer (depth=0)
+            strategy_query = f"(@depth:[0 0])=>[KNN {k_strategy} @vector $vec AS score]"
+            res_strat = self.client.execute_command(
+                "FT.SEARCH", self.index_name, strategy_query, 
+                "PARAMS", "2", "vec", vector_bin, 
+                "SORTBY", "score", "ASC", "DIALECT", "2"
+            )
+            
+            # 2. Search Logic/Data Layer (depth > 0) with Entity filtering if provided
+            filter_part = ""
+            if entities:
+                safe_entities = [e.replace(" ", "\\ ") for e in entities]
+                filter_part = f"@entities:{{{'|'.join(safe_entities)}}}"
+            
+            data_query = f"({filter_part} @depth:[1 2])=>[KNN {k_data} @vector $vec AS score]" if filter_part else f"(@depth:[1 2])=>[KNN {k_data} @vector $vec AS score]"
+            
+            res_data = self.client.execute_command(
+                "FT.SEARCH", self.index_name, data_query, 
+                "PARAMS", "2", "vec", vector_bin, 
+                "SORTBY", "score", "ASC", "DIALECT", "2"
+            )
+
+            # Helper to parse FT.SEARCH responses
+            def parse_res(res):
+                out = []
+                if res and res[0] > 0:
+                    for i in range(2, len(res), 2):
+                        fields = res[i]
+                        for j in range(0, len(fields), 2):
+                            if fields[j].decode('utf-8') == "content":
+                                out.append(fields[j+1].decode('utf-8'))
+                return out
+
+            results = parse_res(res_strat) + parse_res(res_data)
+            return list(dict.fromkeys(results)) # Deduplicate while preserving order
+        except Exception as e:
+            self.logger.error(f"Hierarchical search failed: {e}")
+            return []
 
     async def search_by_entities(self, entities: List[str], k: int = 5) -> List[str]:
         """Exact match search based on entity tags (The 'Hop' in Graph-RAG)."""

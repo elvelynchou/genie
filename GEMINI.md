@@ -46,7 +46,7 @@
 ## [SESSION_COMPRESSION_SNAPSHOT: PHASE_4_EVOLUTION_IN_PROGRESS]
 **1. 核心架构进化 (Done):**
 - **Unified Finance Pipeline**: 实现了配置驱动 (`sources.json`) 的财经监控流水线。采用 `stealth_browser` 批量抓取 + `FinanceCleaner` 结构化清洗 + RAG 自动存档。
-- **Lightweight Graph-RAG**: 升级了 Redis 索引，支持实体标签 (Entity Tagging)。`MemoryRefiner` 现在能自动提取实体与关系，实现“图谱跳跃”检索。
+- **Lightweight Graph-RAG**: 升级为**层级化图谱 (Hierarchical Graph-RAG)**。支持 Strategy(0), Logic(1), Data(2) 三层索引。`MemoryRefiner` 现在能自动归档宏观意图与执行逻辑，实现“策略优先”的关联检索。
 - **Cyber Persona Interaction**: `stealth_browser` 引入了贝塞尔曲线鼠标移动、非均匀打字节奏及拼写错误修正模拟，实现了“交互层的身份锁定”。
 - **Smart Routing & Loop Break**: 针对图片、视频、财经、抓取等任务实现了强路由和强制循环阻断，杜绝了工具调用的死循环。
 

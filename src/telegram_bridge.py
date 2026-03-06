@@ -330,20 +330,25 @@ async def handle_message(message: types.Message, forced_input: str = None):
     for i in range(max_iterations):
         history = await redis_mgr.get_history(chat_id); summary = await redis_mgr.get_summary(chat_id); state = await redis_mgr.get_state(chat_id)
         
-        # 核心进化：Unified Retrieval Engine (Graph + Vector)
+        # 核心进化：Unified Hierarchical Retrieval Engine (Graph + Vector)
         rag_context = ""
         if i == 0:
             try:
                 loop = asyncio.get_event_loop()
+                # 提取实体用于过滤
                 entities = await loop.run_in_executor(None, lambda: orchestrator.extract_entities(user_input))
-                graph_results = await redis_mgr.search_by_entities(entities) if entities else []
+                # 获取查询向量
                 vector = await loop.run_in_executor(None, lambda: orchestrator.get_embedding(user_input))
-                vector_results = await redis_mgr.search_vector(vector) if vector else []
-                combined_rag = list(set(graph_results + vector_results))
-                if combined_rag:
-                    rag_context = "\n".join([f"- {res}" for e, res in enumerate(combined_rag)])
-                    logger.info(f"RAG Context loaded: {len(combined_rag)} snippets found.")
-            except Exception as e: logger.error(f"RAG failed: {e}")
+                
+                if vector:
+                    # 使用层级化检索：策略优先
+                    combined_rag = await redis_mgr.search_hierarchical(vector, entities=entities)
+                    
+                    if combined_rag:
+                        rag_context = "\n".join([f"- {res}" for res in combined_rag])
+                        logger.info(f"Hierarchical RAG loaded: {len(combined_rag)} snippets found.")
+            except Exception as e:
+                logger.error(f"Hierarchical RAG retrieval failed: {e}")
 
         loop_input = f"ROOT GOAL: {user_input}\nCURRENT STEP INPUT: {current_input}"
         if rag_context: loop_input += f"\n[Relevant Past Experiences & Knowledge]:\n{rag_context}"
