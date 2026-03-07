@@ -312,6 +312,35 @@ async def handle_photo(message: types.Message):
 async def handle_message(message: types.Message, forced_input: str = None):
     if not await is_allowed(message.from_user.id): return
     chat_id = str(message.chat.id); user_input = forced_input if forced_input else message.text
+    
+    # 核心进化：L0 Instinct Bypass (条件反射层)
+    instinct = await redis_mgr.get_instinct(user_input)
+    if instinct:
+        logger.info(f"L0 Instinct HIT: {instinct['name']} for '{user_input}'")
+        status_msg = await message.answer(f"⚡ **L0 本能激活**：正在执行 {instinct['name']}...")
+        agent = registry.get_agent(instinct["name"])
+        if agent:
+            # 物理级参数纠偏与执行 (复用下方逻辑)
+            agent_args = instinct["args"]
+            # ... (参数纠偏逻辑在执行前会跑)
+            try:
+                result = await agent.execute(chat_id, **agent_args)
+                await status_msg.delete()
+                if result.status == "SUCCESS":
+                    if instinct["name"] == "finance_monitor":
+                        if "report" in result.data: await safe_send_message(message, f"📊 **财经自动快报 (L0)**：\n\n{result.data['report']}")
+                        await message.answer("✅ 财经监控本能执行完毕。")
+                    elif "file_path" in result.data:
+                        await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
+                        await message.answer(f"✅ {instinct['name']} 本能执行完毕。")
+                    else:
+                        await message.answer(f"✅ 本能执行成功: {result.message}")
+                    return # 彻底跳过 LLM 调度
+            except Exception as e:
+                logger.error(f"L0 Instinct failed: {e}")
+                await status_msg.edit_text("⚠️ 本能执行受阻，正在切换到 LLM 逻辑思考...")
+
+    # 如果没命中 L0 或 L0 失败，进入原来的 LLM 调度逻辑
     all_tools = registry.agents; filtered_tools_list = list(all_tools.values())
     force_tool_for_first_round = None; is_video_task = False; is_image_task = False; is_report_task = False; is_browse_task = False
 

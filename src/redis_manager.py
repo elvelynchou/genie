@@ -2,6 +2,7 @@ import redis
 import json
 import logging
 import numpy as np
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 class RedisManager:
@@ -61,6 +62,35 @@ class RedisManager:
         key = f"state:{chat_id}"
         res = self.client.hgetall(key)
         return {k.decode('utf-8'): v.decode('utf-8') for k, v in res.items()}
+
+    # --- L0: Instincts (Fast-path triggers) ---
+    async def set_instinct(self, trigger: str, agent_name: str, args: Dict[str, Any]):
+        """Store a high-frequency successful action pattern."""
+        key = f"instinct:{trigger.lower().strip()}"
+        data = {
+            "agent_name": agent_name,
+            "args": json.dumps(args),
+            "created_at": datetime.now().isoformat()
+        }
+        self.client.hset(key, mapping=data)
+        self.client.expire(key, 604800) # 1 week TTL for instincts
+
+    async def get_instinct(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """Check if user input matches a known 'Instinct' (L0 bypass)."""
+        # Simple exact match or specialized finance/xpub patterns
+        triggers = [user_input.lower().strip()]
+        if "/run_finance" in triggers[0]: triggers.append("run_finance")
+        if "/x_post" in triggers[0]: triggers.append("x_post")
+        
+        for t in triggers:
+            key = f"instinct:{t}"
+            if self.client.exists(key):
+                res = self.client.hgetall(key)
+                return {
+                    "name": res[b"agent_name"].decode('utf-8'),
+                    "args": json.loads(res[b"args"].decode('utf-8'))
+                }
+        return None
 
     # --- L3: Vector / RAG (Now on DB 0) ---
     def init_vector_index(self, dim: int = 768):
