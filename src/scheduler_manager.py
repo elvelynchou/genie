@@ -45,40 +45,40 @@ class SchedulerManager:
         result = await dreamer.execute(self.admin_chat_id)
         if result.status == "SUCCESS":
             logger.info("Nightly dreaming complete.")
-            # 只有在有新发现时才打扰用户（可选，也可设为完全静默）
             if "No new patterns" not in result.message:
+                # 梦境报告默认发往主话题
                 await self.bot.send_message(self.admin_chat_id, "🌙 **离线梦境报告**：昨夜我已完成记忆巩固，提炼了新的宏观策略与逻辑。")
         else:
             logger.error(f"Nightly dreaming failed: {result.errors}")
 
-    async def _safe_send(self, text: str):
+    async def _safe_send(self, text: str, topic_id: Optional[int] = None):
         """Safe message sending with chunking and robust error handling."""
         if not text: return
         
         CHUNK_SIZE = 3500
         chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
-        logger.info(f"Sending message in {len(chunks)} chunks...")
+        logger.info(f"Sending message in {len(chunks)} chunks to topic {topic_id}...")
         
         for i, chunk in enumerate(chunks):
             try:
-                await self.bot.send_message(self.admin_chat_id, chunk, parse_mode="Markdown")
+                await self.bot.send_message(self.admin_chat_id, chunk, parse_mode="Markdown", message_thread_id=topic_id)
                 logger.info(f"Chunk {i+1}/{len(chunks)} sent successfully.")
             except Exception as e:
                 logger.warning(f"Chunk {i+1} Markdown failed, retrying as plain text: {e}")
                 try:
-                    await self.bot.send_message(self.admin_chat_id, chunk, parse_mode=None)
+                    await self.bot.send_message(self.admin_chat_id, chunk, parse_mode=None, message_thread_id=topic_id)
                     logger.info(f"Chunk {i+1}/{len(chunks)} sent as plain text.")
                 except Exception as e2:
                     logger.error(f"Chunk {i+1} failed completely: {e2}")
             await asyncio.sleep(0.5)
 
-    async def half_hourly_finance_report(self, is_manual: bool = False):
+    async def half_hourly_finance_report(self, is_manual: bool = False, topic_id: Optional[int] = None):
         """执行半小时一次的财经自动监控"""
         if not self.admin_chat_id:
             logger.error("ADMIN_CHAT_ID not set.")
             return
 
-        # 时间排除逻辑：仅针对非手动触发的任务执行静默
+        # 时间排除逻辑
         if not is_manual:
             now = datetime.now(self.tz)
             current_time = now.time()
@@ -89,14 +89,14 @@ class SchedulerManager:
                 logger.info(f"Finance monitor suppressed during silent hours ({now.strftime('%H:%M')})")
                 return
 
-        logger.info(f"Starting finance monitoring (Manual: {is_manual})...")
-        await self.bot.send_message(self.admin_chat_id, "🔍 正在启动自动财经监控...\n[阶段 1/2: 正在抓取多路源数据]")
+        logger.info(f"Starting finance monitoring (Manual: {is_manual}, Topic: {topic_id})...")
+        await self.bot.send_message(self.admin_chat_id, "🔍 正在启动自动财经监控...\n[阶段 1/2: 正在抓取多路源数据]", message_thread_id=topic_id)
         
         monitor = registry.get_agent("finance_monitor")
         
         try:
             # 运行重型任务
-            result = await monitor.execute(self.admin_chat_id)
+            result = await monitor.execute(self.admin_chat_id, message_thread_id=topic_id)
             
             if result.status == "SUCCESS":
                 if "No new content" in result.message or "No significant new changes" in result.message:
@@ -110,16 +110,16 @@ class SchedulerManager:
                     msg += f"📂 **本次更新文件**：\n{file_list}\n\n"
                     msg += f"🔍 **当前市场现状回顾**：\n{status_quo[:2000]}"
                     
-                    await self._safe_send(msg)
+                    await self._safe_send(msg, topic_id=topic_id)
                 else:
                     report_text = result.data.get("report", "")
                     file_list = result.data.get("files", "")
                     header = f"📊 **财经自动快报** (北京时间 {datetime.now(self.tz).strftime('%H:%M')}):\n\n"
                     footer = f"\n\n📂 **分源文件列表**：\n{file_list}"
-                    await self._safe_send(header + report_text + footer)
+                    await self._safe_send(header + report_text + footer, topic_id=topic_id)
             else:
                 logger.error(f"Scheduled finance monitor failed: {result.errors}")
-                await self.bot.send_message(self.admin_chat_id, f"❌ 财经监控执行失败: {result.errors[:500]}")
+                await self.bot.send_message(self.admin_chat_id, f"❌ 财经监控执行失败: {result.errors[:500]}", message_thread_id=topic_id)
         except Exception as e:
             logger.error(f"Finance report task crashed: {e}", exc_info=True)
 
