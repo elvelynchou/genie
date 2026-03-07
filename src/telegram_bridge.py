@@ -129,6 +129,8 @@ async def safe_send_message(message_or_id, text: str):
                 logger.error(f"Failed to send chunk: {e2}")
         await asyncio.sleep(0.5)
 
+# --- 快捷指令处理器 (保留管理类指令，业务类移交 L0) ---
+
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
     if not await is_allowed(message.from_user.id): return
@@ -140,12 +142,7 @@ async def trigger_report(message: types.Message):
     await message.answer("🚀 手动触发每日科技趋势报告流...")
     asyncio.create_task(scheduler_mgr.daily_github_report())
 
-@dp.message(Command("run_finance"))
-async def trigger_finance(message: types.Message):
-    if not await is_allowed(message.from_user.id): return
-    await message.answer("🚀 手动触发半小时财经监控流 (无视静默期)...")
-    # 传递 is_manual=True
-    asyncio.create_task(scheduler_mgr.half_hourly_finance_report(is_manual=True))
+# 注意：/run_finance, /x_login, /x_post 现在由下方的 handle_message -> L0 Instincts 统一接管
 
 @dp.message(Command("dream"))
 async def cmd_dream(message: types.Message):
@@ -182,46 +179,6 @@ async def reset_session(message: types.Message):
         asyncio.create_task(registry.get_agent("memory_refiner").execute(chat_id, history=history, session_status="RESET_BY_USER"))
     await redis_mgr.clear_history(chat_id); redis_mgr.client.delete(f"summary:{chat_id}")
     await message.answer("🔄 会话已复盘并重置。")
-
-@dp.message(Command("x_login"))
-async def cmd_x_login(message: types.Message):
-    if not await is_allowed(message.from_user.id): return
-    args = message.text.replace("/x_login", "").strip()
-    profile = args if args else "geclibot_profile"
-    await message.answer(f"🌐 正在开启 Chrome (Nodriver) 窗口进行 Profile [{profile}] 登录...")
-    agent = registry.get_agent("stealth_browser")
-    asyncio.create_task(agent.execute(
-        str(message.chat.id), 
-        engine="nodriver", 
-        headless=False, 
-        profile=profile, 
-        keep_open=True,
-        actions=[{"action": "goto", "params": {"url": "https://x.com/login"}}]
-    ))
-
-@dp.message(Command("x_post"))
-async def cmd_x_post(message: types.Message):
-    if not await is_allowed(message.from_user.id): return
-    raw_text = message.text.replace("/x_post", "").strip()
-    if not raw_text:
-        await message.answer("Usage: `/x_post [打开窗口] 内容`", parse_mode="Markdown")
-        return
-    
-    use_headless = False if any(kw in raw_text.lower() for kw in ["打开窗口", "gui", "window"]) else True
-    use_engine = "nodriver"
-    content = raw_text.replace("打开窗口", "").replace("gui", "").replace("window", "").strip()
-
-    status = await message.answer(f"🐦 正在通过 Chrome (Nodriver) 发布推文 (Headless: {use_headless})...")
-    agent = registry.get_agent("xpub")
-    result = await agent.execute(str(message.chat.id), content=content, profile="geclibot_profile", headless=use_headless, engine=use_engine)
-    await status.delete()
-    if result.status == "SUCCESS":
-        snapshot = result.data.get("debug_snapshot")
-        if snapshot:
-            await registry.get_agent("file_sender").execute(str(message.chat.id), file_path=snapshot, delete_after_send=False)
-        await message.answer(f"✅ 推文发布指令执行完毕！\n\n内容预览：\n{content}")
-    else:
-        await message.answer(f"❌ 发布失败: {result.errors}")
 
 def load_template_prompt(prompt_or_template: str) -> str:
     template_path = f"/etc/myapp/genie/src/agents/imgtools/genimgtemplate/{prompt_or_template}.json"
@@ -320,27 +277,42 @@ async def handle_message(message: types.Message, forced_input: str = None):
         status_msg = await message.answer(f"⚡ **L0 本能激活**：正在执行 {instinct['name']}...")
         agent = registry.get_agent(instinct["name"])
         if agent:
-            # 物理级参数纠偏与执行 (复用下方逻辑)
             agent_args = instinct["args"]
-            # ... (参数纠偏逻辑在执行前会跑)
+            
+            # 物理级参数纠偏逻辑
+            if instinct["name"] == "stealth_browser" or instinct["name"] == "xpub":
+                if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver", "推特", "x.com"]):
+                    agent_args["engine"] = "nodriver"
+                else:
+                    if instinct["name"] != "xpub": agent_args["engine"] = "camoufox"
+                    else: agent_args["engine"] = "nodriver"
+                if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "window"]):
+                    agent_args["headless"] = False
+                if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]):
+                    agent_args["keep_open"] = True; agent_args["headless"] = False
+                if "geclibot_profile" in user_input: agent_args["profile"] = "geclibot_profile"
+
             try:
+                # 专门针对 finance_monitor 的手动标记
+                if instinct["name"] == "finance_monitor":
+                    result = await scheduler_mgr.half_hourly_finance_report(is_manual=True)
+                    await status_msg.delete(); return
+                
                 result = await agent.execute(chat_id, **agent_args)
                 await status_msg.delete()
                 if result.status == "SUCCESS":
-                    if instinct["name"] == "finance_monitor":
-                        if "report" in result.data: await safe_send_message(message, f"📊 **财经自动快报 (L0)**：\n\n{result.data['report']}")
-                        await message.answer("✅ 财经监控本能执行完毕。")
-                    elif "file_path" in result.data:
+                    if "file_path" in result.data:
                         await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
+                        if instinct["name"] == "xpub" and result.data.get("debug_snapshot"):
+                            await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["debug_snapshot"], delete_after_send=False)
                         await message.answer(f"✅ {instinct['name']} 本能执行完毕。")
                     else:
                         await message.answer(f"✅ 本能执行成功: {result.message}")
-                    return # 彻底跳过 LLM 调度
+                    return 
             except Exception as e:
                 logger.error(f"L0 Instinct failed: {e}")
                 await status_msg.edit_text("⚠️ 本能执行受阻，正在切换到 LLM 逻辑思考...")
 
-    # 如果没命中 L0 或 L0 失败，进入原来的 LLM 调度逻辑
     all_tools = registry.agents; filtered_tools_list = list(all_tools.values())
     force_tool_for_first_round = None; is_video_task = False; is_image_task = False; is_report_task = False; is_browse_task = False
 
@@ -390,8 +362,6 @@ async def handle_message(message: types.Message, forced_input: str = None):
 
     for i in range(max_iterations):
         history = await redis_mgr.get_history(chat_id); summary = await redis_mgr.get_summary(chat_id); state = await redis_mgr.get_state(chat_id)
-        
-        # 核心进化：Unified Hierarchical Retrieval Engine (Graph + Vector)
         rag_context = ""
         if i == 0:
             try:
@@ -415,7 +385,6 @@ async def handle_message(message: types.Message, forced_input: str = None):
         try:
             loop = asyncio.get_event_loop()
             force_tool = force_tool_for_first_round if i == 0 else None
-            # 增加硬超时
             response = await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: orchestrator.chat(loop_input, history, summary=summary, tools=available_tools, force_tool_name=force_tool)),
                 timeout=90
@@ -438,24 +407,18 @@ async def handle_message(message: types.Message, forced_input: str = None):
             elif processed["type"] == "function_call":
                 agent_name = processed["name"]; agent_args = processed["args"]
                 
-                # 修复逻辑：物理级参数纠偏
                 if agent_name == "stealth_browser" or agent_name == "xpub":
                     if any(kw in user_input.lower() for kw in ["chrome", "谷歌", "chromium", "nodriver", "推特", "x.com"]):
                         agent_args["engine"] = "nodriver"
                     else:
                         if agent_name != "xpub": agent_args["engine"] = "camoufox"
                         else: agent_args["engine"] = "nodriver"
-
                     if any(kw in user_input.lower() for kw in ["打开窗口", "gui", "显示浏览器", "window"]):
                         agent_args["headless"] = False
-                    
                     if any(kw in user_input.lower() for kw in ["保持开启", "不关闭", "keep open"]):
-                        agent_args["keep_open"] = True
-                        agent_args["headless"] = False
-                    
+                        agent_args["keep_open"] = True; agent_args["headless"] = False
                     if "profile" not in agent_args or agent_args["profile"] == "default":
                         if "geclibot_profile" in user_input: agent_args["profile"] = "geclibot_profile"
-                    
                     if agent_name == "stealth_browser" and "actions" in agent_args:
                         agent_args["actions"] = [a for a in agent_args["actions"] if a and (a.get("action") or a.get("url"))]
                         if not agent_args["actions"]:
@@ -468,57 +431,40 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 if agent_name == "gemini_cli_executor": agent_args["yolo"] = True
                 agent = registry.get_agent(agent_name)
                 if not agent: current_input = f"Error: Agent {agent_name} not found."; continue
-                logger.info(f"Executing {agent_name} for {chat_id}")
                 
-                # 安全保护：移除可能存在的 chat_id 冲突
                 agent_args.pop("chat_id", None)
-                
-                async def heartbeat():
-                    count = 0
-                    while True:
-                        await asyncio.sleep(20); count += 1
-                        try: await status_msg.edit_text(f"⏳ 任务已执行 {count*20}s...")
-                        except: pass
-                hb = asyncio.create_task(heartbeat())
-                try: result = await agent.execute(chat_id, **agent_args)
-                finally: hb.cancel()
-                
-                if result.status == "SUCCESS":
-                    if agent_name == "finance_monitor":
-                        # 强行阻断：财经任务执行完即刻彻底结束，不给模型任何二次思考的机会
-                        if "report" in result.data:
-                            await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
-                        logger.info("Finance Monitor explicit break. Task complete.")
-                        await message.answer("✅ 财经监控任务执行完毕。")
-                        break
-
-                    if "file_path" in result.data:
-                        if "nanobanana-output" in result.data["file_path"]:
-                            await finalize_nanobanana_output(chat_id, result.data, message)
-                            if is_image_task or is_video_task or is_report_task or is_browse_task:
-                                if is_report_task and "report" in result.data: await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
+                try: 
+                    result = await agent.execute(chat_id, **agent_args)
+                    if result.status == "SUCCESS":
+                        if agent_name == "finance_monitor":
+                            if "report" in result.data: await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
+                            await message.answer("✅ 财经监控任务执行完毕。"); break
+                        
+                        if "file_path" in result.data:
+                            if "nanobanana-output" in result.data["file_path"]:
+                                await finalize_nanobanana_output(chat_id, result.data, message)
                                 await message.answer("✅ 任务执行完毕。"); break
-                        else:
-                            await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
-                            if is_report_task and "report" in result.data: await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
-                            if is_image_task or is_video_task or is_report_task or is_browse_task:
+                            else:
+                                await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], delete_after_send=False)
                                 await message.answer("✅ 任务执行完毕。"); break
-                    
-                    if is_browse_task:
-                        extracted = result.data.get("page_content", "")
-                        if extracted: current_input = f"Tool {agent_name} SUCCESS. HERE IS THE WEB CONTENT:\n\n{extracted[:5000]}\n\nNOW SUMMARIZE THIS TO THE USER IMMEDIATELY. DO NOT CALL ANY MORE TOOLS."
-                        else: current_input = f"Tool {agent_name} SUCCESS but content empty. Inform the user."
-                        available_tools = [] 
-                    else: current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"
-                    await redis_mgr.set_state(chat_id, result.data)
-                else: current_input = f"Tool {agent_name} FAILED: {result.errors}"
+                        
+                        if is_browse_task:
+                            extracted = result.data.get("page_content", "")
+                            if extracted: current_input = f"Tool {agent_name} SUCCESS. HERE IS THE WEB CONTENT:\n\n{extracted[:5000]}\n\nNOW SUMMARIZE THIS TO THE USER IMMEDIATELY. DO NOT CALL ANY MORE TOOLS."
+                            else: current_input = f"Tool {agent_name} SUCCESS but content empty. Inform the user."
+                            available_tools = [] 
+                        else: current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"
+                        await redis_mgr.set_state(chat_id, result.data)
+                    else: current_input = f"Tool {agent_name} FAILED: {result.errors}"
+                except Exception as e:
+                    logger.error(f"Action execution error: {e}")
+                    current_input = f"Error executing {agent_name}: {e}"
                 continue
         except Exception as e: logger.error(f"Loop error: {e}", exc_info=True); await message.answer("❌ Orchestration Error."); break
 
 async def cleanup_hanging_processes():
     try:
         import psutil
-        current_pid = os.getpid()
         for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
             try:
                 cmd = " ".join(proc.info['cmdline'] or []); name = proc.info['name'].lower()
@@ -542,7 +488,6 @@ async def main():
     finally:
         logger.info("Cleaning up resources before exit...")
         scheduler_mgr.shutdown()
-        # 退出时强制清理所有相关的残留进程 (不再受 30 分钟限制)
         try:
             import psutil
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
@@ -557,7 +502,5 @@ async def main():
         logger.info("GenieBot stopped.")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    try: asyncio.run(main())
+    except KeyboardInterrupt: pass
