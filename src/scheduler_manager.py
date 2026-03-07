@@ -101,11 +101,22 @@ class SchedulerManager:
             if result.status == "SUCCESS":
                 if "No new content" in result.message or "No significant new changes" in result.message:
                     logger.info("Finance monitor: No significant new changes.")
-                    if is_manual:
-                        await self.bot.send_message(self.admin_chat_id, "ℹ️ **财经监控完成**：对比上次抓取，暂无重大新增事件。")
+                    
+                    # 即使无新大事，也列出产生的文件和当前现状
+                    file_list = result.data.get("files", "未知")
+                    status_quo = result.data.get("status_quo", "无摘要")
+                    
+                    msg = f"ℹ️ **财经监控完成**：对比上次抓取，暂无重大新增事件。\n\n"
+                    msg += f"📂 **本次更新文件**：\n{file_list}\n\n"
+                    msg += f"🔍 **当前市场现状回顾**：\n{status_quo[:2000]}"
+                    
+                    await self._safe_send(msg)
                 else:
                     report_text = result.data.get("report", "")
-                    await self._safe_send(f"📊 **财经自动快报** (北京时间 {datetime.now(self.tz).strftime('%H:%M')}):\n\n{report_text}")
+                    file_list = result.data.get("files", "")
+                    header = f"📊 **财经自动快报** (北京时间 {datetime.now(self.tz).strftime('%H:%M')}):\n\n"
+                    footer = f"\n\n📂 **分源文件列表**：\n{file_list}"
+                    await self._safe_send(header + report_text + footer)
             else:
                 logger.error(f"Scheduled finance monitor failed: {result.errors}")
                 await self.bot.send_message(self.admin_chat_id, f"❌ 财经监控执行失败: {result.errors[:500]}")

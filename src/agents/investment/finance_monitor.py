@@ -64,6 +64,7 @@ class FinanceMonitorAgent(BaseAgent):
         semantic_data_blocks = [r["data"] for r in results if r.get("type") == "semantic_tree"]
         
         digest_payload = ""
+        full_status_quo = "" # 用于在无更新时描述当前情况
         generated_files = []
         date_str = datetime.now().strftime("%Y%m%d_%H%M")
 
@@ -80,13 +81,14 @@ class FinanceMonitorAgent(BaseAgent):
                     continue
                 
                 clean_md = clean_res.data["clean_md"]
+                full_status_quo += f"\n--- {name} ---\n{clean_md[:500]}...\n" # 记录概要
                 
-                # 3.2 强制落地文件 (无论是否重复)
+                # 3.2 落地文件 (无论是否重复)
                 os.makedirs(self.SOURCE_DIR, exist_ok=True)
                 f_path = os.path.join(self.SOURCE_DIR, f"{name}_{date_str}.md")
                 with open(f_path, "w", encoding="utf-8") as f:
                     f.write(f"# {name} - {date_str}\n\n{clean_md}")
-                generated_files.append(f_path) # 核心修复：确保文件被加入发送队列
+                generated_files.append({"name": name, "path": f_path})
 
                 # 3.3 去重逻辑 (仅影响摘要和RAG)
                 item_hash = hashlib.md5(clean_md.encode()).hexdigest()
@@ -122,14 +124,21 @@ class FinanceMonitorAgent(BaseAgent):
         # 4. 强制发送分源文件
         self.logger.info(f"Sending {len(generated_files)} source files...")
         file_sender = registry.get_agent("file_sender")
-        for f in generated_files:
+        for f_info in generated_files:
             try:
-                await file_sender.execute(chat_id, file_path=f, delete_after_send=False)
+                await file_sender.execute(chat_id, file_path=f_info["path"], delete_after_send=False)
             except Exception as fe:
-                self.logger.error(f"Failed to send file {f}: {fe}")
+                self.logger.error(f"Failed to send file {f_info['path']}: {fe}")
+
+        # 构造文件列表说明文本
+        file_list_msg = "\n".join([f"- {f['name']}: `{f['path']}`" for f in generated_files])
 
         if not digest_payload:
-            return AgentResult(status="SUCCESS", message="No significant new changes in digest.")
+            return AgentResult(
+                status="SUCCESS", 
+                data={"files": file_list_msg, "status_quo": full_status_quo},
+                message="No significant new changes in digest."
+            )
 
         # 5. 生成总结报告
         self.logger.info("Generating final report...")
@@ -146,7 +155,11 @@ class FinanceMonitorAgent(BaseAgent):
             digest_text = "摘要分析超时，请查看上方分源原始文件。"
 
         if "暂无重大新变动" in digest_text:
-            return AgentResult(status="SUCCESS", message="No significant new changes in digest.")
+            return AgentResult(
+                status="SUCCESS", 
+                data={"files": file_list_msg, "status_quo": full_status_quo, "report": digest_text},
+                message="No significant new changes in digest."
+            )
 
         # 6. 归档与返回最终摘要
         self.redis_mgr.client.set(f"last_finance_digest:{chat_id}", digest_text)
@@ -157,6 +170,6 @@ class FinanceMonitorAgent(BaseAgent):
 
         return AgentResult(
             status="SUCCESS",
-            data={"file_path": report_path, "report": digest_text},
+            data={"file_path": report_path, "report": digest_text, "files": file_list_msg},
             message=f"Pipeline complete. {len(generated_files)} sources processed."
         )
