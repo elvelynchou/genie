@@ -59,19 +59,26 @@ class FinanceMonitorAgent(BaseAgent):
         if res.status != "SUCCESS":
             return AgentResult(status="FAILED", errors=res.errors, message="Batch browsing failed.")
 
-        # 3. Processing
+        # 3. Processing - 兼容多种提取标签
         results = res.data.get("results", [])
-        semantic_data_blocks = [r["data"] for r in results if r.get("type") == "semantic_tree"]
+        # 核心修复：同时尝试读取所有可能的内容标签
+        semantic_data_blocks = [r["data"] for r in results if r.get("type") in ["semantic_tree", "page_content", "page_text"]]
+        
+        if not semantic_data_blocks:
+            self.logger.error("No data blocks found in browser results.")
+            return AgentResult(status="FAILED", message="Browser extraction returned no readable content.")
+
+        self.logger.info(f"Retrieved {len(semantic_data_blocks)} data blocks. Starting analysis...")
         
         digest_payload = ""
-        full_status_quo = "" # 用于在无更新时描述当前情况
+        full_status_quo = "" 
         generated_files = []
         date_str = datetime.now().strftime("%Y%m%d_%H%M")
 
         for idx, raw_text in enumerate(semantic_data_blocks):
             if idx >= len(source_order): break
             name = source_order[idx]
-            self.logger.info(f"Processing {name} ({idx+1}/{len(semantic_data_blocks)})...")
+            self.logger.info(f"Processing source: {name}...")
             
             try:
                 # 3.1 AI Cleaning
@@ -81,9 +88,9 @@ class FinanceMonitorAgent(BaseAgent):
                     continue
                 
                 clean_md = clean_res.data["clean_md"]
-                full_status_quo += f"\n--- {name} ---\n{clean_md[:500]}...\n" # 记录概要
+                full_status_quo += f"\n--- {name} ---\n{clean_md[:500]}...\n" 
                 
-                # 3.2 落地文件 (无论是否重复)
+                # 3.2 强制落地文件
                 os.makedirs(self.SOURCE_DIR, exist_ok=True)
                 f_path = os.path.join(self.SOURCE_DIR, f"{name}_{date_str}.md")
                 with open(f_path, "w", encoding="utf-8") as f:
@@ -95,42 +102,32 @@ class FinanceMonitorAgent(BaseAgent):
                 is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
                 
                 if not is_seen or "🚨" in clean_md:
-                    self.logger.info(f"New content/alert detected for {name}. Indexing...")
+                    self.logger.info(f"New content for {name}. Storing...")
                     loop = asyncio.get_event_loop()
-                    try:
-                        embedding = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)), timeout=60)
-                        entities = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)), timeout=60)
-                        
-                        if embedding:
-                            await self.redis_mgr.store_vector(
-                                doc_id=f"fin_{name}_{date_str}_{chat_id}",
-                                vector=embedding,
-                                content=f"Source: {name} | Date: {date_str}\n{clean_md}",
-                                entities=entities,
-                                depth=2
-                            )
-                        
-                        digest_payload += f"\n--- {name} ---\n{clean_md}\n"
-                        self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
-                        self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
-                    except Exception as ai_e:
-                        self.logger.error(f"AI enrichment failed for {name}: {ai_e}")
-                else:
-                    self.logger.info(f"{name} is duplicate. Skipping digest.")
+                    embedding = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)), timeout=60)
+                    entities = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)), timeout=60)
+                    
+                    if embedding:
+                        await self.redis_mgr.store_vector(
+                            doc_id=f"fin_{name}_{date_str}_{chat_id}",
+                            vector=embedding,
+                            content=f"Source: {name} | Date: {date_str}\n{clean_md}",
+                            entities=entities,
+                            depth=2
+                        )
+                    
+                    digest_payload += f"\n--- {name} ---\n{clean_md}\n"
+                    self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
+                    self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
 
             except Exception as e:
-                self.logger.error(f"Critical error processing {name}: {e}")
+                self.logger.error(f"Error processing {name}: {e}")
 
         # 4. 强制发送分源文件
-        self.logger.info(f"Sending {len(generated_files)} source files...")
         file_sender = registry.get_agent("file_sender")
         for f_info in generated_files:
-            try:
-                await file_sender.execute(chat_id, file_path=f_info["path"], delete_after_send=False)
-            except Exception as fe:
-                self.logger.error(f"Failed to send file {f_info['path']}: {fe}")
+            await file_sender.execute(chat_id, file_path=f_info["path"], delete_after_send=False)
 
-        # 构造文件列表说明文本
         file_list_msg = "\n".join([f"- {f['name']}: `{f['path']}`" for f in generated_files])
 
         if not digest_payload:
@@ -141,10 +138,8 @@ class FinanceMonitorAgent(BaseAgent):
             )
 
         # 5. 生成总结报告
-        self.logger.info("Generating final report...")
         last_report = self.redis_mgr.client.get(f"last_finance_digest:{chat_id}")
         last_report_text = last_report.decode('utf-8') if last_report else "无上期报告。"
-
         analysis_prompt = f"对比上期：{last_report_text[:1500]}\n分析本期：{digest_payload[:10000]}\n仅报告新增重大事件。中文Markdown格式。"
         
         try:
@@ -152,14 +147,7 @@ class FinanceMonitorAgent(BaseAgent):
             resp = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.chat(analysis_prompt, [])), timeout=90)
             digest_text = self.orchestrator.process_response(resp).get("content", "Analysis failed.")
         except:
-            digest_text = "摘要分析超时，请查看上方分源原始文件。"
-
-        if "暂无重大新变动" in digest_text:
-            return AgentResult(
-                status="SUCCESS", 
-                data={"files": file_list_msg, "status_quo": full_status_quo, "report": digest_text},
-                message="No significant new changes in digest."
-            )
+            digest_text = "摘要分析超时。"
 
         # 6. 归档与返回最终摘要
         self.redis_mgr.client.set(f"last_finance_digest:{chat_id}", digest_text)
@@ -171,5 +159,5 @@ class FinanceMonitorAgent(BaseAgent):
         return AgentResult(
             status="SUCCESS",
             data={"file_path": report_path, "report": digest_text, "files": file_list_msg},
-            message=f"Pipeline complete. {len(generated_files)} sources processed."
+            message=f"Pipeline complete."
         )
