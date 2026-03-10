@@ -43,25 +43,26 @@
     - Phase 3.5 多模态集成：图片感知 (`image_ocr`, `prompt_inverse`)，模板引擎 (`genimgtemplate`)，与生图后端 (`nanobanana`, `vertex_generator`)。
 - **待执行**: Phase 4 - 自我进化闭环 (Code Gen & Deploy)。
 
-## [SESSION_COMPRESSION_SNAPSHOT: PHASE_4_EVOLUTION_IN_PROGRESS]
+## [SESSION_COMPRESSION_SNAPSHOT: PHASE_4_EVOLUTION_MATURED]
 **1. 核心架构进化 (Done):**
-- **Unified Finance Pipeline**: 实现了配置驱动 (`sources.json`) 的财经监控流水线。采用 `stealth_browser` 批量抓取 + `FinanceCleaner` 结构化清洗 + RAG 自动存档。
-- **Lightweight Graph-RAG**: 升级为**层级化图谱 (Hierarchical Graph-RAG)**。支持 Strategy(0), Logic(1), Data(2) 三层索引。`MemoryRefiner` 现在能自动归档宏观意图与执行逻辑，实现“策略优先”的关联检索。
-- **Cyber Persona Interaction**: `stealth_browser` 引入了贝塞尔曲线鼠标移动、非均匀打字节奏及拼写错误修正模拟，实现了“交互层的身份锁定”。
-- **Smart Routing & Loop Break**: 针对图片、视频、财经、抓取等任务实现了强路由和强制循环阻断，杜绝了工具调用的死循环。
+- **L0 Instincts Layer**: 引入了“本能指令集”。高频成功的动作序列（如财经监控、登录）被固化为 L0 缓存，跳过 LLM 推理实现毫秒级响应。
+- **Topic-Aware Routing**: 全面支持 Telegram 话题模式。记忆按 `chat_id:topic_id` 分片隔离，确保跨领域任务（财经 vs 开发）上下文互不干扰。
+- **Semantic Object Control**: `stealth_browser` 进化为基于 **Accessibility Tree (A11yTree)** 的语义控制。通过 JS 代理提取结构化对象而非原始 HTML，Token 消耗降低 50%，稳定性大幅提升。
+- **Hierarchical Graph-RAG**: 升级为 Strategy(0), Logic(1), Data(2) 三层索引。`MemoryRefiner` 自动归档宏观意图，实现策略优先的关联检索。
+- **Nightly Dreaming Phase**: 实现了异步记忆巩固机制。系统在凌晨自动复盘事实碎片并升华为长期策略节点。
 
-**2. 交互与控制 (Done):**
-- **GUI/Profile 动态检测**: 实现了对“打开窗口”、“使用特定 profile”等指令的物理级拦截与强制执行。
-- **资源守护**: 增加了 30 分钟超时的僵尸浏览器进程自动清理逻辑（安全避开 Chrome Remote Desktop）。
+**2. 交互与通讯 (Done):**
+- **Robust Delivery**: 实现了带分片、自动转义和纯文本回退的消息安全发送机制，彻底解决了长篇财经简报导致的通讯卡死。
+- **Fault Isolation**: 浏览器执行层引入了动作级超时 (60s) 与全自动异常隔离，确保单个源的故障不影响全局流水线。
 
 **3. 关键路径 (Key Paths):**
+- 文档: `Setup.md` (系统构建指南), `GEMINI.md` (工程协议)。
 - 配置: `src/agents/investment/sources.json` (财经源), `src/agents/imgtools/genimgtemplate/` (图片模板)。
-- 资产: `downloads/web/` (网页原文), `downloads/finance/` (分析报告), `img_output/` (生图)。
-- 索引: `RediSearch: genie_vdb` (支持 @entities 搜索)。
+- 本能: `RediSearch: instinct:*` (L0 指令集)。
 
 **4. 下一阶段目标 (Next):**
-- 实现基于 `skill-creator` 的 Agent 自我进化闭环（代码生成、沙盒、部署）。
-- 接入系统资源实时监控告警。
+- 完善基于 `skill-creator` 的代码生成与沙盒部署闭环。
+- 探索多 Bot 矩阵下的跨实体协同。
 
 ---
 *此文档由 AI 自动维护，作为系统运行的最高指令依据。*

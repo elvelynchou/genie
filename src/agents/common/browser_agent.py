@@ -46,46 +46,71 @@ class HumanBehavior:
 
 class BrowserAgentInput(BaseModel):
     profile: str = Field("default", description="Browser profile name.")
-    actions: List[Dict[str, Any]] = Field(..., description="List of actions to execute.")
+    actions: List[Dict[str, Any]] = Field(..., description="List of actions to execute. Available: goto, click, type, click_role, type_role, wait, snapshot, extract_semantic.")
     headless: bool = Field(True, description="Whether to run in headless mode.")
     keep_open: bool = Field(False, description="Whether to keep the browser window open.")
     engine: str = Field("camoufox", description="Automation engine: 'nodriver' or 'camoufox'.")
 
 class BrowserAgent(BaseAgent):
     name = "stealth_browser"
-    description = "Advanced stealth browser agent. Actions: goto, click, type, wait, snapshot, extract_semantic, inject_semantic_proxy."
+    description = "Advanced stealth browser agent with Semantic Object Control (A11yTree). Supports role-based interaction and human-like behavior."
     input_schema = BrowserAgentInput
     
     PROFILES_BASE_DIR = "/etc/myapp/genie/profiles"
     DOWNLOAD_DIR = "/etc/myapp/genie/downloads"
 
+    # JS 语义提取引擎：跨浏览器兼容的 A11y 树模拟器
+    A11Y_EXTRACTOR_JS = """
+    (() => {
+        const results = [];
+        const interactiveSelectors = 'button, a, input, textarea, select, [role], [aria-label], [data-testid]';
+        const elements = document.querySelectorAll(interactiveSelectors);
+        
+        elements.forEach((el, index) => {
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || el.offsetWidth === 0) return;
+            
+            const rect = el.getBoundingClientRect();
+            const role = el.getAttribute('role') || el.tagName.toLowerCase();
+            const name = el.innerText?.trim() || el.getAttribute('aria-label') || el.placeholder || el.value || '';
+            
+            if (!name && !['input', 'textarea'].includes(el.tagName.toLowerCase())) return;
+            
+            results.push({
+                role: role,
+                name: name.substring(0, 100),
+                pos: [Math.round(rect.left + rect.width/2), Math.round(rect.top + rect.height/2)]
+            });
+        });
+        
+        document.querySelectorAll('p, h1, h2, h3').forEach(el => {
+            if (el.innerText.trim().length > 50) {
+                results.push({ role: 'text', name: el.innerText.trim().substring(0, 300) });
+            }
+        });
+
+        return results.map(r => r.role === 'text' ? `Text: ${r.name}` : `[${r.role.toUpperCase()}] "${r.name}" (pos: ${r.pos})`).join('\\n');
+    })()
+    """
+
     SEMANTIC_PROXY_JS = """
     window.GenieBridge = {
-        findEntity: (query) => {
-            let el = document.querySelector(`[data-testid="${query}"]`);
-            if (el) return el;
-            const targets = document.querySelectorAll('button, a, [role="button"]');
-            for (let t of targets) {
-                if (t.innerText.trim().toLowerCase() === query.toLowerCase()) return t;
+        findByRole: (role, name) => {
+            const selectorMap = {
+                'button': 'button, [role="button"]',
+                'link': 'a',
+                'textbox': 'input[type="text"], input:not([type]), textarea',
+                'checkbox': 'input[type="checkbox"]',
+                'heading': 'h1, h2, h3, h4, h5, h6',
+                'combobox': 'input, select, [role="combobox"]'
+            };
+            const selector = selectorMap[role.toLowerCase()] || role;
+            const elements = document.querySelectorAll(selector);
+            for (let el of elements) {
+                const text = (el.innerText || el.ariaLabel || el.placeholder || el.value || "").toLowerCase();
+                if (text.includes(name.toLowerCase())) return el;
             }
-            el = document.querySelector(`[aria-label="${query}"]`);
-            if (el) return el;
             return null;
-        },
-        semanticClick: async (query) => {
-            const el = window.GenieBridge.findEntity(query);
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                await new Promise(r => setTimeout(r, 500));
-                el.click();
-                return true;
-            }
-            return false;
-        },
-        semanticType: async (query, text) => {
-            const el = window.GenieBridge.findEntity(query);
-            if (el) { el.focus(); return true; }
-            return false;
         }
     };
     """
@@ -112,7 +137,7 @@ class BrowserAgent(BaseAgent):
         return selector
 
     async def run(self, params: BrowserAgentInput, chat_id: str) -> AgentResult:
-        self.logger.info(f"Starting {params.engine} for {chat_id} (Headless: {params.headless})")
+        self.logger.info(f"Starting {params.engine} for {chat_id}")
         profile_path = os.path.join(self.PROFILES_BASE_DIR, params.profile)
         os.makedirs(profile_path, exist_ok=True)
         os.makedirs(self.DOWNLOAD_DIR, exist_ok=True)
@@ -149,6 +174,7 @@ class BrowserAgent(BaseAgent):
             if not params.keep_open and browser: browser.stop()
 
     def _compress_ax_tree(self, nodes) -> str:
+        """Compatibility layer for CDP-based A11y Tree (Nodriver)"""
         actual_nodes = nodes['nodes'] if isinstance(nodes, dict) and 'nodes' in nodes else nodes
         if not isinstance(actual_nodes, list): return ""
         compressed = []
@@ -185,34 +211,56 @@ class BrowserAgent(BaseAgent):
             return AgentResult(status="FAILED", errors=str(e), logs=logs)
 
     async def _execute_actions(self, page, actions, chat_id, profile, logs):
+        """Nodriver 执行器"""
         results = []
         for i, item in enumerate(actions):
             action = item.get("action")
             if not action: continue
             p = item.get("params", {}); effective_params = {**item, **p}
-            expanded = self._expand_selector(effective_params.get("selector"))
+            selector = effective_params.get("selector"); expanded = self._expand_selector(selector)
             self.logger.info(f"Action {i+1}: {action}")
 
             try:
                 if action == "goto": await page.get(effective_params.get("url"))
                 elif action == "wait": await asyncio.sleep(float(effective_params.get("seconds", 5)))
+                elif action == "inject_semantic_proxy": await page.evaluate(self.SEMANTIC_PROXY_JS)
                 elif action == "extract_semantic":
-                    nodes = await page.send(uc.cdp.accessibility.get_full_ax_tree())
-                    data = self._compress_ax_tree(nodes)
-                    if not data: data = await page.evaluate("() => document.body.innerText")
+                    # 优先使用 A11Y_EXTRACTOR_JS 保证一致性
+                    data = await page.evaluate(self.A11Y_EXTRACTOR_JS)
                     results.append({"type": "semantic_tree", "data": data})
-                    self.logger.info(f"Extracted {len(data)} chars.")
+                    self.logger.info(f"Extracted {len(data)} chars via JS-A11y.")
+                elif action == "click":
+                    if expanded:
+                        elem = await page.select(expanded)
+                        if elem: await elem.click()
+                elif action == "type":
+                    if expanded:
+                        elem = await page.select(expanded)
+                        if elem:
+                            await elem.focus()
+                            async def nt(c): await elem.send_keys(c)
+                            async def nb(): await elem.send_keys("\b")
+                            await HumanBehavior.human_type(nt, nb, str(effective_params.get("text", "")))
+                elif action == "click_role":
+                    role = effective_params.get("role"); name = effective_params.get("name")
+                    await page.evaluate(f"GenieBridge.findByRole('{role}', '{name}').click()")
+                elif action == "type_role":
+                    role = effective_params.get("role"); name = effective_params.get("name")
+                    text = str(effective_params.get("text", ""))
+                    await page.evaluate(f"(() => {{ const el = GenieBridge.findByRole('{role}', '{name}'); el.value = '{text}'; el.dispatchEvent(new Event('input', {{ bubbles: true }})); el.dispatchEvent(new Event('change', {{ bubbles: true }})); }})()")
             except Exception as e:
+                self.logger.error(f"Action {action} failed: {e}")
                 results.append({"type": "error", "data": str(e)})
         return results
 
     async def _execute_camoufox_actions(self, page, actions, chat_id, profile, logs):
+        """Camoufox 执行器"""
         results = []
         for i, item in enumerate(actions):
             action = item.get("action")
             if not action: continue
             p = item.get("params", {}); effective_params = {**item, **p}
-            expanded = self._expand_selector(effective_params.get("selector"))
+            selector = effective_params.get("selector"); expanded = self._expand_selector(selector)
             self.logger.info(f"Action {i+1}: {action}")
 
             try:
@@ -220,23 +268,29 @@ class BrowserAgent(BaseAgent):
                     await page.goto(effective_params.get("url"), wait_until="domcontentloaded", timeout=60000)
                 elif action == "wait":
                     await asyncio.sleep(float(effective_params.get("seconds", 5)))
+                elif action == "inject_semantic_proxy":
+                    await page.evaluate(self.SEMANTIC_PROXY_JS)
+                elif action == "click_role":
+                    role = effective_params.get("role"); name = effective_params.get("name")
+                    locator = page.get_by_role(role, name=name).first
+                    await locator.scroll_into_view_if_needed()
+                    box = await locator.bounding_box()
+                    if box:
+                        await self._human_mouse_move(page, box['x'] + box['width']/2, box['y'] + box['height']/2)
+                        await page.mouse.click(self.last_mouse_pos[0], self.last_mouse_pos[1])
+                    else: await locator.click()
+                elif action == "type_role":
+                    role = effective_params.get("role"); name = effective_params.get("name")
+                    text = str(effective_params.get("text", ""))
+                    locator = page.get_by_role(role, name=name).first
+                    await locator.focus()
+                    async def ft(c): await page.keyboard.type(c)
+                    async def fb(): await page.keyboard.press("Backspace")
+                    await HumanBehavior.human_type(ft, fb, text)
                 elif action == "extract_semantic":
-                    data = ""
-                    try:
-                        snap = await page.accessibility.snapshot()
-                        data = self._compress_playwright_ax(snap) if snap else ""
-                    except: pass
-                    
-                    if not data or len(data.strip()) < 50:
-                        self.logger.info("Semantic tree empty, falling back to innerText...")
-                        data = await page.evaluate("() => document.body.innerText")
-                    
-                    if data:
-                        results.append({"type": "semantic_tree", "data": data})
-                        results.append({"type": "page_content", "data": data})
-                        self.logger.info(f"Extracted {len(data)} chars.")
-                    else:
-                        self.logger.warning("Extraction failed to find content.")
+                    data = await page.evaluate(self.A11Y_EXTRACTOR_JS)
+                    results.append({"type": "semantic_tree", "data": data})
+                    self.logger.info(f"Extracted {len(data)} chars via JS-A11y.")
                 elif action == "click":
                     if expanded: await page.click(expanded, timeout=10000)
                 elif action == "type":
@@ -251,10 +305,3 @@ class BrowserAgent(BaseAgent):
                 self.logger.error(f"Action {action} failed: {e}")
                 results.append({"type": "error", "data": str(e)})
         return results
-
-    def _compress_playwright_ax(self, snapshot, level=0) -> str:
-        lines = []
-        name = str(snapshot.get('name', '')); role = str(snapshot.get('role', ''))
-        if name and len(name.strip()) > 2: lines.append(f"{'  ' * level}[{role}] {name}")
-        for child in snapshot.get('children', []): lines.append(self._compress_playwright_ax(child, level + 1))
-        return "\n".join([l for l in lines if l.strip()])[:5000]
