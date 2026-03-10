@@ -9,6 +9,7 @@ class FileSenderInput(BaseModel):
     caption: Optional[str] = Field(None, description="Optional caption for the file/video/image.")
     delete_after_send: bool = Field(True, description="Whether to delete the local file after successful transmission.")
     as_document: bool = Field(False, description="Force sending as a document even if it's a photo or video.")
+    message_thread_id: Optional[int] = Field(None, description="The Telegram message thread ID (for topics).")
 
 class FileSenderAgent(BaseAgent):
     name = "file_sender"
@@ -30,6 +31,7 @@ class FileSenderAgent(BaseAgent):
 
         logs = [{"step": "file_check", "path": params.file_path, "exists": True}]
         ext = os.path.splitext(params.file_path)[1].lower()
+        tid = params.message_thread_id
         
         try:
             from aiogram.types import FSInputFile
@@ -37,19 +39,19 @@ class FileSenderAgent(BaseAgent):
             
             # Logic to choose the correct aiogram method
             if params.as_document:
-                await self.bot.send_document(chat_id, file, caption=params.caption)
+                await self.bot.send_document(chat_id, file, caption=params.caption, message_thread_id=tid)
                 logs.append({"step": "send", "method": "send_document"})
             elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                await self.bot.send_photo(chat_id, file, caption=params.caption)
+                await self.bot.send_photo(chat_id, file, caption=params.caption, message_thread_id=tid)
                 logs.append({"step": "send", "method": "send_photo"})
             elif ext in ['.mp4', '.mov', '.mkv', '.avi']:
-                await self.bot.send_video(chat_id, file, caption=params.caption)
+                await self.bot.send_video(chat_id, file, caption=params.caption, message_thread_id=tid)
                 logs.append({"step": "send", "method": "send_video"})
             elif ext in ['.mp3', '.m4a', '.ogg']:
-                await self.bot.send_audio(chat_id, file, caption=params.caption)
+                await self.bot.send_audio(chat_id, file, caption=params.caption, message_thread_id=tid)
                 logs.append({"step": "send", "method": "send_audio"})
             else:
-                await self.bot.send_document(chat_id, file, caption=params.caption)
+                await self.bot.send_document(chat_id, file, caption=params.caption, message_thread_id=tid)
                 logs.append({"step": "send", "method": "send_document"})
 
             # Optional cleanup
