@@ -9,34 +9,38 @@
       {
         "step": "wait_for_load",
         "action": "wait",
-        "params": { "seconds": 7 }
+        "params": { "seconds": 10 }
       },
       {
-        "step": "inject_native_proxy",
-        "action": "inject_semantic_proxy"
+        "step": "upload_image",
+        "action": "upload",
+        "params": { 
+          "selector": "input[type='file'][data-testid='fileInput']",
+          "file_path": "{image_path}"
+        }
       },
       {
-        "step": "focus_textarea",
-        "action": "click",
-        "params": { "selector": "tweetTextarea_0" }
+        "step": "wait_after_upload",
+        "action": "wait",
+        "params": { "seconds": 8 }
       },
       {
-        "step": "focus_and_type",
+        "step": "type_content",
         "action": "type",
         "params": { 
-          "selector": "tweetTextarea_0",
+          "selector": "[data-testid='tweetTextarea_0']",
           "text": "{content}"
         }
       },
       {
-        "step": "wait_before_post",
+        "step": "final_check_wait",
         "action": "wait",
-        "params": { "seconds": 3 }
+        "params": { "seconds": 5 }
       },
       {
         "step": "click_post",
         "action": "click",
-        "params": { "selector": "tweetButton" }
+        "params": { "selector": "[data-testid='tweetButton']" }
       },
       {
         "step": "debug_snapshot",
@@ -45,7 +49,7 @@
       {
         "step": "confirm_finish",
         "action": "wait",
-        "params": { "seconds": 5 }
+        "params": { "seconds": 15 }
       }
     ]
   }

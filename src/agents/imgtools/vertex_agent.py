@@ -12,6 +12,7 @@ from google.genai import types
 class VertexGenInput(BaseModel):
     prompt_or_template: str = Field(..., description="The prompt string or the name of a template JSON.")
     reference_image: Optional[str] = Field(None, description="Local path to the reference image.")
+    aspect_ratio: str = Field("1:1", description="The aspect ratio of the generated image (e.g., '1:1', '3:2', '16:9').")
 
 class VertexGenAgent(BaseAgent):
     name = "vertex_generator"
@@ -77,7 +78,7 @@ class VertexGenAgent(BaseAgent):
 
         contents = [types.Content(role="user", parts=contents_parts)]
 
-        # 3. Configure generation based on your example
+        # 3. Configure generation
         generate_content_config = types.GenerateContentConfig(
             temperature=1,
             top_p=0.95,
@@ -90,7 +91,7 @@ class VertexGenAgent(BaseAgent):
                 types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF")
             ],
             image_config=types.ImageConfig(
-                aspect_ratio="1:1",
+                aspect_ratio=params.aspect_ratio,
                 output_mime_type="image/png",
             ),
             thinking_config=types.ThinkingConfig(
@@ -99,16 +100,15 @@ class VertexGenAgent(BaseAgent):
         )
 
         try:
-            self.logger.info(f"Calling Vertex AI for {chat_id}...")
+            self.logger.info(f"Calling Vertex AI for {chat_id} with ratio {params.aspect_ratio}...")
             from google.genai.errors import ClientError
 
             response = None
             max_retries = 3
-            base_delay = 10 # 初始等待 10 秒
+            base_delay = 10 
             
             for attempt in range(max_retries):
                 try:
-                    # 使用 async client 进行非阻塞调用
                     response = await asyncio.wait_for(
                         self.client.aio.models.generate_content(
                             model="gemini-3.1-flash-image-preview",
@@ -117,22 +117,20 @@ class VertexGenAgent(BaseAgent):
                         ),
                         timeout=120.0
                     )
-                    break # 如果成功，跳出重试循环
+                    break 
                 except ClientError as e:
                     if e.code == 429 and attempt < max_retries - 1:
-                        sleep_time = base_delay * (2 ** attempt) # 指数退避: 10s, 20s, 40s
-                        self.logger.warning(f"Vertex AI rate limited (429). Retrying in {sleep_time}s... (Attempt {attempt+1}/{max_retries})")
+                        sleep_time = base_delay * (2 ** attempt) 
+                        self.logger.warning(f"Vertex AI rate limited (429). Retrying in {sleep_time}s...")
                         await asyncio.sleep(sleep_time)
                     else:
-                        # 非 429 错误，或重试次数耗尽，向上抛出
                         raise e
                 except asyncio.TimeoutError:
-                    return AgentResult(status="FAILED", errors="Vertex AI image generation timed out after 120 seconds.", logs=logs)
+                    return AgentResult(status="FAILED", errors="Vertex AI image generation timed out.", logs=logs)
 
             if not response:
-                return AgentResult(status="FAILED", errors="Failed to generate image after retries.", logs=logs)
+                return AgentResult(status="FAILED", errors="Failed after retries.", logs=logs)
 
-            # Extract image from response parts
             image_bytes = None
             text_response = ""
             if response.candidates and response.candidates[0].content.parts:
@@ -160,7 +158,7 @@ class VertexGenAgent(BaseAgent):
                     next_steps=["file_sender"]
                 )
             else:
-                return AgentResult(status="FAILED", errors="No image data returned.", message=text_response.strip(), logs=logs)
+                return AgentResult(status="FAILED", errors="No image data.", message=text_response.strip(), logs=logs)
 
         except Exception as e:
             self.logger.error(f"Vertex AI failed: {e}", exc_info=True)

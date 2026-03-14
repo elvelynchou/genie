@@ -1,0 +1,16 @@
+{
+  "template_metadata": {
+    "name": "newspaper",
+    "created_at": "2026-03-12T14:00:00Z",
+    "chat_id": "system"
+  },
+  "core_instructions": "Generate a wide landscape-oriented 1950s vintage newspaper. The layout must prioritize high-density text over visual elements.",
+  "visual_details": {
+    "masthead": "A very thin, compact header at the top with the text '半小时金融与企业监控'. Small date and issue number on the same line to save vertical space.",
+    "layout": "Dense 4-column landscape broadsheet. Each column is packed with legible, small serif body text. Tiny, postage-stamp sized monochrome illustrations only.",
+    "style": "Authentic mid-century financial journal aesthetic. Aged, slightly yellowed paper with visible grain and fiber. High-contrast black ink with subtle bleeding.",
+    "typography": "Classic newspaper serif fonts. Large bold headlines followed by multiple paragraphs of small, justified body text.",
+    "spacing": "Minimal white space. Columns are separated by thin vertical lines. High information density."
+  },
+  "usage_hint": "Landscape orientation. High text-to-image ratio."
+}

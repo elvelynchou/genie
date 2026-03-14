@@ -30,8 +30,8 @@ class SchedulerManager:
 
     def shutdown(self):
         if self.scheduler.running:
-            self.scheduler.shutdown()
-            logger.info("Scheduler shut down.")
+            self.scheduler.shutdown(wait=False)
+            logger.info("Scheduler shut down (immediate).")
 
     async def pulse(self, is_manual: bool = False):
         """唤醒心跳 Agent 进行环境感知与决策"""

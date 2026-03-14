@@ -46,7 +46,7 @@ class HumanBehavior:
 
 class BrowserAgentInput(BaseModel):
     profile: str = Field("default", description="Browser profile name.")
-    actions: List[Dict[str, Any]] = Field(..., description="List of actions to execute. Available: goto, click, type, click_role, type_role, wait, snapshot, extract_semantic.")
+    actions: List[Dict[str, Any]] = Field(..., description="List of actions to execute.")
     headless: bool = Field(True, description="Whether to run in headless mode.")
     keep_open: bool = Field(False, description="Whether to keep the browser window open.")
     engine: str = Field("camoufox", description="Automation engine: 'nodriver' or 'camoufox'.")
@@ -59,7 +59,6 @@ class BrowserAgent(BaseAgent):
     PROFILES_BASE_DIR = "/etc/myapp/genie/profiles"
     DOWNLOAD_DIR = "/etc/myapp/genie/downloads"
 
-    # JS 语义提取引擎：跨浏览器兼容的 A11y 树模拟器
     A11Y_EXTRACTOR_JS = """
     (() => {
         const results = [];
@@ -137,7 +136,7 @@ class BrowserAgent(BaseAgent):
         return selector
 
     async def run(self, params: BrowserAgentInput, chat_id: str) -> AgentResult:
-        self.logger.info(f"Starting {params.engine} for {chat_id}")
+        self.logger.info(f"Starting {params.engine} for {chat_id} (Headless: {params.headless})")
         profile_path = os.path.join(self.PROFILES_BASE_DIR, params.profile)
         os.makedirs(profile_path, exist_ok=True)
         os.makedirs(self.DOWNLOAD_DIR, exist_ok=True)
@@ -172,23 +171,6 @@ class BrowserAgent(BaseAgent):
             return AgentResult(status="SUCCESS", data={"results": results_data, "page_content": page_content}, logs=logs)
         finally:
             if not params.keep_open and browser: browser.stop()
-
-    def _compress_ax_tree(self, nodes) -> str:
-        """Compatibility layer for CDP-based A11y Tree (Nodriver)"""
-        actual_nodes = nodes['nodes'] if isinstance(nodes, dict) and 'nodes' in nodes else nodes
-        if not isinstance(actual_nodes, list): return ""
-        compressed = []
-        interesting = ['button', 'link', 'textbox', 'heading', 'checkbox']
-        for node in actual_nodes:
-            if hasattr(node, 'name'):
-                name = node.name.value if node.name and node.name.value else ""
-                role = node.role.value if node.role else "unknown"
-            else:
-                n = node.get('name', {}); name = n.get('value', '') if isinstance(n, dict) else ''
-                r = node.get('role', {}); role = r.get('value', 'unknown') if isinstance(r, dict) else 'unknown'
-            if not name.strip() and role not in interesting: continue
-            compressed.append(f"[{role.upper()}] {name.strip()}")
-        return "\n".join(compressed[:150])
 
     async def _run_camoufox(self, params: BrowserAgentInput, profile_path: str, chat_id: str, logs: list) -> AgentResult:
         try:
@@ -225,7 +207,6 @@ class BrowserAgent(BaseAgent):
                 elif action == "wait": await asyncio.sleep(float(effective_params.get("seconds", 5)))
                 elif action == "inject_semantic_proxy": await page.evaluate(self.SEMANTIC_PROXY_JS)
                 elif action == "extract_semantic":
-                    # 优先使用 A11Y_EXTRACTOR_JS 保证一致性
                     data = await page.evaluate(self.A11Y_EXTRACTOR_JS)
                     results.append({"type": "semantic_tree", "data": data})
                     self.logger.info(f"Extracted {len(data)} chars via JS-A11y.")
@@ -241,6 +222,27 @@ class BrowserAgent(BaseAgent):
                             async def nt(c): await elem.send_keys(c)
                             async def nb(): await elem.send_keys("\b")
                             await HumanBehavior.human_type(nt, nb, str(effective_params.get("text", "")))
+                elif action == "upload":
+                    if expanded and effective_params.get("file_path"):
+                        f_path = os.path.abspath(effective_params.get("file_path"))
+                        self.logger.info(f"CDP-Injecting file: {f_path}")
+                        try:
+                            # 1. 使用物理选择器锁定元素
+                            elem = await page.select(expanded)
+                            if elem:
+                                # 2. 通过后端节点 ID 进行 CDP 原生注入
+                                await page.send(uc.cdp.dom.set_file_input_files(
+                                    files=[f_path], 
+                                    backend_node_id=elem.backend_node_id
+                                ))
+                                self.logger.info("✅ Native CDP upload command sent.")
+                                # 3. 物理触发一次页面重绘/激活
+                                await page.evaluate("window.dispatchEvent(new Event('resize'))")
+                                await asyncio.sleep(5)
+                            else:
+                                self.logger.error(f"Upload failed: Element {expanded} not found.")
+                        except Exception as ue:
+                            self.logger.error(f"CDP upload failed: {ue}")
                 elif action == "click_role":
                     role = effective_params.get("role"); name = effective_params.get("name")
                     await page.evaluate(f"GenieBridge.findByRole('{role}', '{name}').click()")
@@ -248,6 +250,10 @@ class BrowserAgent(BaseAgent):
                     role = effective_params.get("role"); name = effective_params.get("name")
                     text = str(effective_params.get("text", ""))
                     await page.evaluate(f"(() => {{ const el = GenieBridge.findByRole('{role}', '{name}'); el.value = '{text}'; el.dispatchEvent(new Event('input', {{ bubbles: true }})); el.dispatchEvent(new Event('change', {{ bubbles: true }})); }})()")
+                elif action == "snapshot":
+                    path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}.png")
+                    await page.save_screenshot(path)
+                    results.append({"type": "screenshot", "file_path": path})
             except Exception as e:
                 self.logger.error(f"Action {action} failed: {e}")
                 results.append({"type": "error", "data": str(e)})
@@ -297,6 +303,9 @@ class BrowserAgent(BaseAgent):
                     if expanded:
                         await page.focus(expanded)
                         await page.keyboard.type(str(effective_params.get("text", "")))
+                elif action == "upload":
+                    if expanded and effective_params.get("file_path"):
+                        await page.set_input_files(expanded, os.path.abspath(effective_params.get("file_path")))
                 elif action == "snapshot":
                     path = os.path.join(self.DOWNLOAD_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{chat_id}.png")
                     await page.screenshot(path=path)

@@ -8,9 +8,10 @@ from agents.registry import registry
 
 class XPubInput(BaseModel):
     content: str = Field(..., description="The text content to post on X.")
-    profile: str = Field("default", description="The browser profile to use.")
+    image_path: Optional[str] = Field(None, description="Local path to an image to upload.")
+    profile: str = Field("geclibot_profile", description="The browser profile to use.")
     headless: bool = Field(True, description="Whether to run in headless mode.")
-    engine: str = Field("camoufox", description="The browser engine to use (nodriver or camoufox).")
+    engine: str = Field("nodriver", description="The browser engine to use (nodriver or camoufox).")
 
 class XPubAgent(BaseAgent):
     name = "xpub"
@@ -38,8 +39,16 @@ class XPubAgent(BaseAgent):
         processed_actions = []
         for step in raw_steps:
             action = step.copy()
-            if "params" in action and "text" in action["params"]:
-                action["params"]["text"] = action["params"]["text"].replace("{content}", params.content)
+            if "params" in action:
+                if "text" in action["params"]:
+                    action["params"]["text"] = action["params"]["text"].replace("{content}", params.content)
+                if "file_path" in action["params"] and params.image_path:
+                    action["params"]["file_path"] = action["params"]["file_path"].replace("{image_path}", params.image_path)
+            
+            # 如果没有图片但步骤是关于图片的，可以跳过
+            if "step" in action and "image" in action["step"] and not params.image_path:
+                continue
+                
             processed_actions.append(action)
 
         # 2. 调用 stealth_browser 执行
@@ -56,6 +65,11 @@ class XPubAgent(BaseAgent):
             )
             
             if res.status == "SUCCESS":
+                # 检查结果中是否有错误动作
+                action_errors = [r["data"] for r in res.data.get("results", []) if r.get("type") == "error"]
+                if action_errors:
+                    return AgentResult(status="FAILED", errors="; ".join(action_errors), message="One or more actions in the X workflow failed.")
+
                 # 提取可能的截图路径用于调试
                 snapshot_path = None
                 for r in res.data.get("results", []):

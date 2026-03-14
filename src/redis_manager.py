@@ -94,17 +94,18 @@ class RedisManager:
 
     # --- L3: Vector / RAG (Now on DB 0) ---
     def init_vector_index(self, dim: int = 768):
-        """Initialize Vector Index with Entity Tagging and Hierarchical Depth support."""
+        """Initialize Vector Index with Entity Tagging, Hierarchical Depth, and Causal Relations."""
         try:
             self.client.execute_command(
                 "FT.CREATE", self.index_name, "ON", "HASH", "PREFIX", "1", "doc:",
                 "SCHEMA", 
                 "content", "TEXT", 
                 "entities", "TAG", "SEPARATOR", ",",
+                "relations", "TEXT", # Causal edges/relational metadata
                 "depth", "NUMERIC", "SORTABLE",
                 "vector", "VECTOR", "HNSW", "6", "TYPE", "FLOAT32", "DIM", str(dim), "DISTANCE_METRIC", "COSINE"
             )
-            self.logger.info(f"Vector index {self.index_name} (with Tags & Depth) created on DB 0.")
+            self.logger.info(f"Vector index {self.index_name} (with Tags, Depth & Relations) created on DB 0.")
             self.rag_enabled = True
         except redis.exceptions.ResponseError as e:
             if "Index already exists" in str(e):
@@ -114,10 +115,11 @@ class RedisManager:
                 self.logger.error(f"Failed to create index: {e}")
                 self.rag_enabled = False
 
-    async def store_vector(self, doc_id: str, vector: List[float], content: str, entities: List[str] = None, depth: int = 2):
+    async def store_vector(self, doc_id: str, vector: List[float], content: str, entities: List[str] = None, depth: int = 2, relations: str = None):
         """
-        Store vector with entities and hierarchical depth.
+        Store vector with entities, hierarchical depth and causal relations.
         depth: 0=Strategy, 1=Logic, 2=Data (default)
+        relations: String describing causal links, e.g., "Failure -> Invalid Selector"
         """
         if not self.rag_enabled: return
         key = f"doc:{doc_id}"
@@ -129,6 +131,8 @@ class RedisManager:
         }
         if entities:
             mapping["entities"] = ",".join(entities)
+        if relations:
+            mapping["relations"] = relations
             
         self.client.hset(key, mapping=mapping)
 
@@ -169,9 +173,17 @@ class RedisManager:
                 if res and res[0] > 0:
                     for i in range(2, len(res), 2):
                         fields = res[i]
+                        field_dict = {}
                         for j in range(0, len(fields), 2):
-                            if fields[j].decode('utf-8') == "content":
-                                out.append(fields[j+1].decode('utf-8'))
+                            key = fields[j].decode('utf-8')
+                            val = fields[j+1].decode('utf-8') if isinstance(fields[j+1], bytes) else str(fields[j+1])
+                            field_dict[key] = val
+                        
+                        content = field_dict.get("content", "")
+                        relations = field_dict.get("relations", "")
+                        if relations:
+                            content += f"\n[Causal Links]: {relations}"
+                        out.append(content)
                 return out
 
             results = parse_res(res_strat) + parse_res(res_data)
@@ -227,6 +239,34 @@ class RedisManager:
         except Exception as e:
             self.logger.error(f"Fetch by depth failed: {e}")
             return []
+
+    async def get_top_similarity(self, query_vector: List[float], depth: Optional[int] = None) -> float:
+        """Returns the similarity score (0.0 to 1.0) of the most similar document."""
+        if not self.rag_enabled: return 0.0
+        vector_bin = np.array(query_vector, dtype=np.float32).tobytes()
+        
+        # Filter by depth if provided (e.g., only compare against other Data nodes)
+        filter_str = f"@depth:[{depth} {depth}]" if depth is not None else "*"
+        query = f"({filter_str})=>[KNN 1 @vector $vec AS score]"
+        
+        try:
+            res = self.client.execute_command(
+                "FT.SEARCH", self.index_name, query, 
+                "PARAMS", "2", "vec", vector_bin, 
+                "SORTBY", "score", "ASC", "LIMIT", "0", "1", "DIALECT", "2"
+            )
+            if res and res[0] > 0:
+                # KNN score in Redis is distance. For COSINE, distance = 1 - similarity.
+                # So similarity = 1 - distance.
+                fields = res[2]
+                for j in range(0, len(fields), 2):
+                    if fields[j].decode('utf-8') == "score":
+                        distance = float(fields[j+1].decode('utf-8'))
+                        return 1.0 - distance
+            return 0.0
+        except Exception as e:
+            self.logger.error(f"Similarity check failed: {e}")
+            return 0.0
 
     async def search_vector(self, query_vector: List[float], k: int = 3) -> List[str]:
         if not self.rag_enabled: return []

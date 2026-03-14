@@ -59,9 +59,8 @@ class FinanceMonitorAgent(BaseAgent):
         if res.status != "SUCCESS":
             return AgentResult(status="FAILED", errors=res.errors, message="Batch browsing failed.")
 
-        # 3. Processing - 兼容多种提取标签
+        # 3. Processing
         results = res.data.get("results", [])
-        # 核心修复：同时尝试读取所有可能的内容标签
         semantic_data_blocks = [r["data"] for r in results if r.get("type") in ["semantic_tree", "page_content", "page_text"]]
         
         if not semantic_data_blocks:
@@ -97,28 +96,48 @@ class FinanceMonitorAgent(BaseAgent):
                     f.write(f"# {name} - {date_str}\n\n{clean_md}")
                 generated_files.append({"name": name, "path": f_path})
 
-                # 3.3 去重逻辑 (仅影响摘要和RAG)
+                # 3.3 去重逻辑 (双重校验：物理指纹 + 语义指纹)
                 item_hash = hashlib.md5(clean_md.encode()).hexdigest()
-                is_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
+                is_physical_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
                 
-                if not is_seen or "🚨" in clean_md:
-                    self.logger.info(f"New content for {name}. Storing...")
-                    loop = asyncio.get_event_loop()
-                    embedding = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)), timeout=60)
-                    entities = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)), timeout=60)
-                    
-                    if embedding:
-                        await self.redis_mgr.store_vector(
-                            doc_id=f"fin_{name}_{date_str}_{chat_id}",
-                            vector=embedding,
-                            content=f"Source: {name} | Date: {date_str}\n{clean_md}",
-                            entities=entities,
-                            depth=2
-                        )
-                    
-                    digest_payload += f"\n--- {name} ---\n{clean_md}\n"
-                    self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
-                    self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
+                # 获取语义向量进行进一步校验
+                loop = asyncio.get_event_loop()
+                embedding = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.get_embedding(clean_md)), timeout=60)
+                
+                semantic_sim = 0.0
+                if embedding:
+                    semantic_sim = await self.redis_mgr.get_top_similarity(embedding, depth=2)
+
+                # 判定决策：物理完全一致 OR 语义相似度极高 (>0.95)
+                is_duplicate = is_physical_seen or (semantic_sim > 0.95)
+                
+                # [审计回显] 打印详细决策过程到终端
+                audit_status = "DUPLICATE (SKIPPED)" if is_duplicate else "NEW CONTENT (ACCEPTED)"
+                if "🚨" in clean_md: audit_status = "ALERT (FORCED ACCEPT)"
+                
+                self.logger.info(f"[Audit Echo] Source: {name} | Hash: {item_hash[:8]} | Sim: {semantic_sim:.4f} | Decision: {audit_status}")
+
+                if not is_duplicate or "🚨" in clean_md:
+                    self.logger.info(f"Indexing new content for {name}...")
+                    try:
+                        entities = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.extract_entities(clean_md)), timeout=60)
+                        
+                        if embedding:
+                            await self.redis_mgr.store_vector(
+                                doc_id=f"fin_{name}_{date_str}_{chat_id}",
+                                vector=embedding,
+                                content=f"Source: {name} | Date: {date_str}\n{clean_md}",
+                                entities=entities,
+                                depth=2
+                            )
+                        
+                        digest_payload += f"\n--- {name} ---\n{clean_md}\n"
+                        self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
+                        self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
+                    except Exception as ai_e:
+                        self.logger.error(f"AI enrichment failed for {name}: {ai_e}")
+                else:
+                    self.logger.info(f"{name} is duplicate. Skipping digest inclusion.")
 
             except Exception as e:
                 self.logger.error(f"Error processing {name}: {e}")
@@ -149,8 +168,11 @@ class FinanceMonitorAgent(BaseAgent):
         except:
             digest_text = "摘要分析超时。"
 
-        # 6. 归档与返回最终摘要
-        self.redis_mgr.client.set(f"last_finance_digest:{chat_id}", digest_text)
+        # 6. 归档与返回最终摘要 (支持话题隔离)
+        tid = getattr(params, "message_thread_id", None)
+        mem_key = f"{chat_id}:{tid or 'main'}"
+        self.redis_mgr.client.set(f"last_finance_digest:{mem_key}", digest_text)
+        
         os.makedirs(self.FINANCE_DIR, exist_ok=True)
         report_path = os.path.join(self.FINANCE_DIR, f"Research_Report_{date_str}.md")
         with open(report_path, "w", encoding="utf-8") as f:

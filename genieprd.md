@@ -62,8 +62,8 @@
 - [x] **生图后端**: 接入 `Nanobanana` (基于 MCP/CLI) 与 `Vertex AI` (Imagen 3 API)，实现文生图/图生图闭环。
 - [x] 优化 Telegram 交互逻辑：实现图片自动落地存储 (`uploads/`) 和生图自动回传 (`img_output/`)，并增加 `/generate` 和 `/edit` 快捷指令。
 
-### Phase 4: 自进化与自动化运维 - 进行中
+### Phase 4: 自进化与自动化运维 - ✅ 已完成 (2026-03-13)
 - [x] 环境准备：安装 RestrictedPython 沙箱环境。
-- [ ] 开发 `code_gen_agent`：根据自然语言生成 BaseAgent 子类。
-- [ ] 实现动态 Agent 热加载与部署审核流程。
-- [ ] 接入监控告警与系统健康检测。
+- [x] 开发 `code_gen_agent`：根据自然语言生成 BaseAgent 子类。
+- [x] 实现动态 Agent 热加载与部署审核流程 (SandboxAgent & DeploymentAgent)。
+- [x] 接入监控告警与系统健康检测 (SysCheckAgent)。

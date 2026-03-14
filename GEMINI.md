@@ -43,26 +43,26 @@
     - Phase 3.5 多模态集成：图片感知 (`image_ocr`, `prompt_inverse`)，模板引擎 (`genimgtemplate`)，与生图后端 (`nanobanana`, `vertex_generator`)。
 - **待执行**: Phase 4 - 自我进化闭环 (Code Gen & Deploy)。
 
-## [SESSION_COMPRESSION_SNAPSHOT: PHASE_4_EVOLUTION_MATURED]
+## [SESSION_COMPRESSION_SNAPSHOT: PHASE_4_EVOLUTION_FINAL_STABILITY]
 **1. 核心架构进化 (Done):**
-- **L0 Instincts Layer**: 引入了“本能指令集”。高频成功的动作序列（如财经监控、登录）被固化为 L0 缓存，跳过 LLM 推理实现毫秒级响应。
-- **Topic-Aware Routing**: 全面支持 Telegram 话题模式。记忆按 `chat_id:topic_id` 分片隔离，确保跨领域任务（财经 vs 开发）上下文互不干扰。
-- **Semantic Object Control**: `stealth_browser` 进化为基于 **Accessibility Tree (A11yTree)** 的语义控制。通过 JS 代理提取结构化对象而非原始 HTML，Token 消耗降低 50%，稳定性大幅提升。
-- **Hierarchical Graph-RAG**: 升级为 Strategy(0), Logic(1), Data(2) 三层索引。`MemoryRefiner` 自动归档宏观意图，实现策略优先的关联检索。
-- **Nightly Dreaming Phase**: 实现了异步记忆巩固机制。系统在凌晨自动复盘事实碎片并升华为长期策略节点。
+- **Causal Graph-RAG**: 升级了记忆索引，支持 `relations` 字段。`MemoryRefiner` 现在能提取因果链条（原因 -> 结果 -> 教训），实现了逻辑级的经验闭环。
+- **L0-Safety-Gate**: 建立了基于因果审计的安全门机制。`SafetyAgent` 会在每一轮高危操作执行前进行意图审计与风险评分，防止系统在自进化过程中崩溃。
+- **Advanced Skill Routing**: 在 Bridge 层实现了针对特定任务（生图、发推、X抓取）的强力路由与工具箱收缩，杜绝了 AI 调用的逻辑漂移。
+- **CDP Native Upload**: `stealth_browser` 进化为支持 Chrome 原生 CDP 协议的物理级文件上传，彻底解决了社交平台隐藏输入框无法操作的难题。
 
-**2. 交互与通讯 (Done):**
-- **Robust Delivery**: 实现了带分片、自动转义和纯文本回退的消息安全发送机制，彻底解决了长篇财经简报导致的通讯卡死。
-- **Fault Isolation**: 浏览器执行层引入了动作级超时 (60s) 与全自动异常隔离，确保单个源的故障不影响全局流水线。
+**2. 交互与体验 (Done):**
+- **Newspaper v3.0**: 实现了横版高密度财经报纸自动生成引擎。支持物理文件直连、四维度精准排版与插图极小化。
+- **Graceful Shutdown**: 完善了 Linux 信号拦截与任务强制取消机制，解决了 Ctrl+C 无法中断主进程的顽疾。
+- **Topic Sharding**: 记忆分片完全成熟，支持不同话题下的独立上下文隔离。
 
 **3. 关键路径 (Key Paths):**
-- 文档: `Setup.md` (系统构建指南), `GEMINI.md` (工程协议)。
-- 配置: `src/agents/investment/sources.json` (财经源), `src/agents/imgtools/genimgtemplate/` (图片模板)。
-- 本能: `RediSearch: instinct:*` (L0 指令集)。
+- 文档: `HEARTBEAT.md` (脉搏协议), `SAFETY_GATE.md` (审计架构), `Setup.md` (构建指南)。
+- 配置: `src/agents/task_status.json` (任务备忘录), `src/agents/socialpub/x_workflow.json` (发推工作流)。
+- Agent: `src/agents/analyzer/safety_agent.py`, `src/agents/imgtools/newspaper_agent.py`。
 
 **4. 下一阶段目标 (Next):**
-- 完善基于 `skill-creator` 的代码生成与沙盒部署闭环。
-- 探索多 Bot 矩阵下的跨实体协同。
+- 完成 `CodeGenAgent` 与 `SandboxManager` 的热部署闭环。
+- 探索基于系统资源监控的自愈式故障恢复（Autonomic Recovery）。
 
 ---
 *此文档由 AI 自动维护，作为系统运行的最高指令依据。*
