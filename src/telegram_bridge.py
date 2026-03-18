@@ -6,6 +6,7 @@ import json
 import shlex
 import hashlib
 import re
+import signal
 from datetime import datetime
 
 # Ensure local imports work correctly
@@ -73,12 +74,11 @@ redis_mgr.init_vector_index(dim=3072)
 system_instruction = """
 You are GenieBot, an autonomous Multi-Agent system. 
 OPERATIONAL DIRECTIVES:
-1. GOAL PERSISTENCE: If a user gives a multi-step instruction, fulfill EVERY sub-task.
-2. FINANCE PIPELINE: When monitoring finance, the system uses Browser -> Cleaner -> RAG -> Report. 
-3. SOCIAL PUBLISHING: To post on X (Twitter), use 'xpub'.
-4. BROWSER STRATEGY: When using 'stealth_browser' to read a page, you MUST include at least two actions: 1) {"action": "goto", "url": "..."} and 2) {"action": "extract_semantic"}.
-5. TOOL USAGE: Call 'gemini_cli_executor' with 'yolo=True' for specialized Skill tasks (X fetching, video downloading, nanobanana).
-6. KNOWLEDGE UTILIZATION: You have access to a Graph-RAG system. Prioritize [Relevant Past Knowledge].
+1. GOAL PERSISTENCE: If a user gives a multi-step instruction, fulfill EVERY sub-task. Do not stop until all goals are met.
+2. CONTINUITY: After a tool succeeds, immediately plan and execute the NEXT logical step. Do not waste rounds on 'ls' or 'checking' if the path was just provided.
+3. FINANCE PIPELINE: Browser -> Cleaner -> RAG -> Report. 
+4. SOCIAL PUBLISHING: To post on X (Twitter), use 'xpub'.
+5. WORKSPACE: Use 'gemini_cli_executor' for Google Docs and Calendar tasks.
 """
 orchestrator = GeminiOrchestrator(api_key=GEMINI_KEY, system_instruction=system_instruction)
 
@@ -115,25 +115,22 @@ async def is_allowed(user_id: int) -> bool:
 async def safe_send_message(message_or_id, text: str):
     target_id = message_or_id.chat.id if hasattr(message_or_id, 'chat') else message_or_id
     thread_id = message_or_id.message_thread_id if hasattr(message_or_id, 'message_thread_id') else None
-    
     CHUNK_SIZE = 3500
     chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
-    logger.info(f"Sending message to {target_id} (Thread: {thread_id}) in {len(chunks)} chunks...")
-    for i, chunk in enumerate(chunks):
+    for chunk in chunks:
         try:
             await bot.send_message(target_id, chunk, parse_mode="Markdown", message_thread_id=thread_id)
-            logger.info(f"Chunk {i+1}/{len(chunks)} sent.")
         except Exception:
             try: await bot.send_message(target_id, chunk, parse_mode=None, message_thread_id=thread_id)
             except: pass
         await asyncio.sleep(0.5)
 
-# --- Command Handlers ---
+# --- Handlers ---
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
     if not await is_allowed(message.from_user.id): return
-    await message.reply("GenieBot Bridge-03 Phase 4 Active.\nTopic-Aware & Safety Gate: ONLINE")
+    await message.reply("GenieBot Bridge-03 Phase 4 Active.\nTopic-Aware, Safety-Gate & Graceful Shutdown: ONLINE")
 
 @dp.message(Command("run_report"))
 async def trigger_report(message: types.Message):
@@ -161,8 +158,6 @@ async def reset_session(message: types.Message):
     if history: asyncio.create_task(registry.get_agent("memory_refiner").execute(mem_key, history=history, session_status="RESET"))
     await redis_mgr.clear_history(mem_key); await message.answer(f"🔄 话题会话已重置。")
 
-# --- Main Message Handler ---
-
 @dp.message(F.text)
 async def handle_message(message: types.Message, forced_input: str = None):
     if not await is_allowed(message.from_user.id): return
@@ -176,72 +171,56 @@ async def handle_message(message: types.Message, forced_input: str = None):
             await registry.get_agent("heartbeat").execute(chat_id, force_task=instinct["name"], is_manual=True, message_thread_id=tid)
             return
 
-    # 2. Reasoning Loop - Explicit Routing for Skills
+    # 2. Reasoning Loop
     all_tools = registry.agents
     filtered_tools_list = list(all_tools.values())
-    force_tool_for_first_round = None; is_browse_task = False
-    current_input = user_input
+    force_tool_for_first_round = None; current_input = user_input
+    completed_subtasks = []
 
-    # 核心进化：强力预路由并收缩工具箱
-    logger.info(f"Routing check for input: {user_input}")
-    
-    # --- X 发布强力预路由 ---
-    if any(kw in user_input.lower() for kw in ["发推", "推文", "tweet", "post on x"]):
-        logger.info("Routing to xpub...")
-        # 尝试从状态中寻找刚才生成的图片
+    # Intelligent Routing
+    task_keywords = ["抓取", "监控", "财经", "生图", "发推", "日历", "doc", "document"]
+    detected_keywords = [kw for kw in task_keywords if kw in user_input.lower()]
+    is_complex_workflow = len(detected_keywords) >= 2
+
+    if any(kw in user_input.lower() for kw in ["监控", "获取", "最新", "抓取", "财经", "finance"]):
+        if not is_complex_workflow:
+            filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "finance_cleaner", "file_sender", "stealth_browser"]]
+        force_tool_for_first_round = "finance_monitor" if "财经" in user_input.lower() else "stealth_browser"
+    elif any(kw in user_input.lower() for kw in ["报纸", "newspaper", "nanobanana", "生图"]):
+        if not is_complex_workflow:
+            target_tools = ["newspaper_renderer", "gemini_cli_executor", "vertex_generator", "file_sender"]
+            filtered_tools_list = [agent for name, agent in all_tools.items() if name in target_tools]
+        force_tool_for_first_round = "newspaper_renderer" if "报纸" in user_input.lower() else "gemini_cli_executor"
+    elif any(kw in user_input.lower() for kw in ["发推", "推文", "tweet", "post on x"]):
         state = await redis_mgr.get_state(mem_key)
-        last_img = state.get("file_path")
-        if last_img:
-            current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'xpub' with content='(Write a short insightful tweet based on the news)' and image_path='{last_img}' and profile='geclibot_profile'."
-        else:
-            current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'xpub' using geclibot_profile. If an image was recently generated, use it."
-        
-        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["xpub", "file_sender"]]
+        if state.get("last_image_path"): current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'xpub' with image_path='{state['last_image_path']}'."
+        if not is_complex_workflow: filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["xpub", "file_sender"]]
         force_tool_for_first_round = "xpub"
 
-    elif "x.com" in user_input.lower() or "twitter.com" in user_input.lower():
-        if any(kw in user_input.lower() for kw in ["下载", "视频", "video", "媒体"]):
-            current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'gemini_cli_executor' with yolo=True. Prompt: 'Use video-downloader skill to download from {user_input}'."
-            filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["gemini_cli_executor", "file_sender"]]
-            force_tool_for_first_round = "gemini_cli_executor"
-        else:
-            current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'gemini_cli_executor' with yolo=True. Prompt: 'Use x-tweet-fetcher skill to fetch from {user_input}'."
-            filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["gemini_cli_executor", "file_sender"]]
-            force_tool_for_first_round = "gemini_cli_executor"
-    elif "nanobanana" in user_input.lower():
-        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'gemini_cli_executor' with yolo=True. Prompt: 'Use nanobanana extension. If reference image exists, use nanobanana__edit_image with preview=false --count=1. If text only, use nanobanana__generate_image with preview=false --count=1.'."
-        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["gemini_cli_executor", "file_sender"]]
-        force_tool_for_first_round = "gemini_cli_executor"
-    elif "报纸" in user_input or "newspaper" in user_input.lower():
-        logger.info("Routing to newspaper_renderer...")
-        current_input = f"USER REQUEST: {user_input}\nCOMMAND: Call 'newspaper_renderer' immediately using the latest financial data in your context."
-        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["newspaper_renderer", "file_sender"]]
-        force_tool_for_first_round = "newspaper_renderer"
-    elif any(kw in user_input.lower() for kw in ["财经", "finance"]):
-        logger.info("Routing to finance_monitor...")
-        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["finance_monitor", "finance_cleaner", "file_sender"]]
-        force_tool_for_first_round = "finance_monitor"
-    elif "http" in user_input.lower() or "抓取" in user_input:
-        filtered_tools_list = [agent for name, agent in all_tools.items() if name in ["stealth_browser", "file_sender"]]
-        force_tool_for_first_round = "stealth_browser"; is_browse_task = True
-
+    if is_complex_workflow: filtered_tools_list = list(all_tools.values())
     available_tools = [agent.get_tool_declaration() for agent in filtered_tools_list if agent.name != "heartbeat"]
-    max_iterations = 5; status_msg = None
+    
+    max_iterations = 10; status_msg = None 
 
     for i in range(max_iterations):
         history = await redis_mgr.get_history(mem_key); summary = await redis_mgr.get_summary(mem_key); state = await redis_mgr.get_state(mem_key)
-        loop_input = f"ROOT GOAL: {user_input}\nCURRENT STEP: {current_input}"
         
-        if i == 0: status_msg = await message.answer("🔍 正在启动任务...")
-        else: await status_msg.edit_text(f"⏳ 正在执行第 {i} 轮自动化...")
+        # 构造增强版推理 Prompt
+        loop_input = f"ROOT GOAL: {user_input}\n"
+        if completed_subtasks:
+            loop_input += f"PROGRESS: The following sub-tasks are already [DONE]: {', '.join(completed_subtasks)}\n"
+        loop_input += f"CURRENT STEP CONTEXT: {current_input}\n"
+        loop_input += "DIRECTIVE: If there are remaining tasks in the ROOT GOAL, call the next tool. DO NOT output final text until EVERYTHING is finished."
+        
+        if i == 0: status_msg = await message.answer("🔍 正在启动任务序列...")
+        else: await status_msg.edit_text(f"⏳ 正在执行第 {i+1} 轮自动化...")
 
         try:
             loop = asyncio.get_event_loop()
             force_tool = force_tool_for_first_round if i == 0 else None
-            logger.info(f"Round {i+1} | Force Tool: {force_tool}")
             response = await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: orchestrator.chat(loop_input, history, summary=summary, tools=available_tools, force_tool_name=force_tool)),
-                timeout=90
+                timeout=120
             )
             processed = orchestrator.process_response(response)
 
@@ -249,53 +228,27 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 reply_text = processed["content"]
                 if status_msg: await bot.delete_message(chat_id, status_msg.message_id)
                 await safe_send_message(message, reply_text)
-                await redis_mgr.push_history(mem_key, "user", user_input if i == 0 else f"[Step {i} complete]")
+                await redis_mgr.push_history(mem_key, "user", user_input if i == 0 else f"[System: All tasks complete]")
                 await redis_mgr.push_history(mem_key, "model", reply_text)
                 if i > 0: asyncio.create_task(registry.get_agent("memory_refiner").execute(mem_key, history=history, session_status="SUCCESS"))
                 break 
 
             elif processed["type"] == "function_call":
-                agent_name = processed["name"]; agent_args = processed["args"]
-                agent_args.pop("chat_id", None)
+                agent_name = processed["name"]; agent_args = processed["args"]; agent_args.pop("chat_id", None)
                 
-                # --- L0-Safety-Gate: 高危动作拦截 ---
+                # Safety Gate
                 if agent_name in ["gemini_cli_executor", "xpub"]:
-                    logger.info(f"🛡️ Auditing high-risk tool: {agent_name}")
                     safety_gate = registry.get_agent("safety_gate")
-                    audit_res = await safety_gate.execute(
-                        chat_id, 
-                        intent=f"Reasoning Loop Round {i+1}: 执行 {agent_name}",
-                        proposed_action=json.dumps(agent_args, ensure_ascii=False),
-                        expected_outcome="继续推进 ROOT GOAL",
-                        potential_side_effects="系统配置变更或社交平台发布"
-                    )
-                    if audit_res.status == "SUCCESS":
-                        score = audit_res.data.get("score")
-                        if score == "RED":
-                            await message.answer(f"🚫 **安全拦截 (RED)**：{audit_res.data.get('reason')}")
-                            break
-                        elif score == "YELLOW":
-                            await message.answer(f"⚠️ **风险预警 (YELLOW)**：{audit_res.data.get('reason')}")
+                    audit_res = await safety_gate.execute(chat_id, intent=f"Step {i+1}: {agent_name}", proposed_action=json.dumps(agent_args, ensure_ascii=False), expected_outcome="Goal progress", potential_side_effects="Impact Check")
+                    if audit_res.status == "SUCCESS" and audit_res.data.get("score") == "RED":
+                        await message.answer(f"🚫 安全拦截: {audit_res.data.get('reason')}"); break
 
-                # --- 物理参数强制修正层 ---
+                # Physical Patching
                 if agent_name == "xpub":
-                    agent_args["engine"] = "nodriver"
-                    agent_args["profile"] = "geclibot_profile"
-                    agent_args["headless"] = False # 强制前台 GUI 模式
-                    # 自动补全图片路径（如果 AI 漏掉了）
-                    if "image_path" not in agent_args or not agent_args["image_path"]:
-                        state = await redis_mgr.get_state(mem_key)
-                        if state.get("file_path"):
-                            agent_args["image_path"] = state.get("file_path")
-                            logger.info(f"Auto-injected image_path: {agent_args['image_path']}")
-
-                if agent_name == "stealth_browser":
-                    if any(kw in user_input.lower() for kw in ["x.com", "twitter", "推特", "chrome"]):
-                        agent_args["engine"] = "nodriver"; agent_args["profile"] = "geclibot_profile"
-                    if "actions" not in agent_args or not agent_args["actions"]:
-                        url_search = re.search(r'https?://[^\s]+', user_input)
-                        url = url_search.group(0) if url_search else "about:blank"
-                        agent_args["actions"] = [{"action": "goto", "params": {"url": url}}, {"action": "wait", "params": {"seconds": 10}}, {"action": "extract_semantic"}]
+                    agent_args.update({"engine": "nodriver", "profile": "geclibot_profile", "headless": False})
+                    if not agent_args.get("image_path"):
+                        st = await redis_mgr.get_state(mem_key)
+                        agent_args["image_path"] = st.get("last_image_path") or st.get("file_path")
 
                 agent = registry.get_agent(agent_name)
                 if not agent: continue
@@ -303,29 +256,26 @@ async def handle_message(message: types.Message, forced_input: str = None):
                 try: 
                     result = await agent.execute(chat_id, **agent_args)
                     if result.status == "SUCCESS":
-                        if agent_name == "finance_monitor":
-                            if "report" in result.data: await safe_send_message(message, f"📊 **财经简报摘要**：\n\n{result.data['report']}")
-                            await message.answer("✅ 财经监控任务执行完毕。"); break
+                        completed_subtasks.append(agent_name)
+                        # Physical Feedback
+                        res_data_brief = {k: v for k, v in result.data.items() if k in ["file_path", "last_image_path", "last_report_path", "output"]}
+                        current_input = f"Agent {agent_name} SUCCESS. Result Brief: {json.dumps(res_data_brief, ensure_ascii=False)}. CONTINUE TO NEXT STEP."
                         
-                        if agent_name == "newspaper_renderer":
-                            if "file_path" in result.data:
-                                await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], message_thread_id=tid)
-                            await message.answer("🗞️ **复古报纸生成完毕**！"); break
-
-                        if agent_name == "xpub":
-                            await message.answer("🐦 **推文已成功发布**！"); break
-
+                        # 核心回显
                         if "file_path" in result.data:
                             await registry.get_agent("file_sender").execute(chat_id, file_path=result.data["file_path"], message_thread_id=tid)
                         
-                        if is_browse_task and result.data.get("page_content"):
-                            current_input = f"SUCCESS. CONTENT:\n{result.data['page_content'][:5000]}\nSummarize and analyze now."
-                            available_tools = []
-                        else:
-                            current_input = f"Tool {agent_name} SUCCESS. Result: {json.dumps(result.data)}"
+                        if agent_name == "finance_monitor":
+                            await safe_send_message(message, f"📊 **财经分析完成**：\n\n{result.data.get('report', '')[:500]}...")
+                        elif agent_name == "xpub":
+                            await message.answer("🐦 **推文发布成功**！")
+                        elif agent_name == "gemini_cli_executor":
+                            if any(k in user_input.lower() for k in ["doc", "document", "calendar", "日历"]):
+                                await message.answer(f"✅ **Workspace 同步成功**：\n{result.data.get('output', '')[:500]}...")
+                        
                         await redis_mgr.set_state(mem_key, result.data)
                     else:
-                        current_input = f"Tool {agent_name} FAILED: {result.errors}"
+                        current_input = f"Agent {agent_name} FAILED: {result.errors}. RE-EVALUATE."
                 except Exception as e: current_input = f"Error: {e}"
                 continue
         except Exception as e: 
@@ -336,57 +286,50 @@ async def handle_message(message: types.Message, forced_input: str = None):
 async def cleanup_hanging_processes():
     try:
         import psutil
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
             try:
-                cmd = " ".join(proc.info['cmdline'] or [])
-                if 'gemini' in cmd and '-p' in cmd: proc.kill()
-                if any(b in proc.info['name'].lower() for b in ['firefox', 'chrome', 'chromium']):
-                    if any(ex in cmd.lower() for ex in ['chrome-remote-desktop', 'chromoting']): continue
-                    proc.kill()
-            except: continue
-    except: pass
+                cmd_list = proc.info['cmdline'] or []
+                cmd = " ".join(cmd_list).lower()
+                name = proc.info['name'].lower()
+                is_gemini = ('gemini' in cmd) or ('.gemini' in cmd and 'node' in name)
+                is_browser = any(b in name for b in ['firefox', 'chrome', 'chromium', 'chromedriver'])
+                is_remote_desktop = any(exclude in cmd for exclude in ['chrome-remote-desktop', 'chromoting'])
+                if (is_gemini or (is_browser and not is_remote_desktop)):
+                    if (datetime.now().timestamp() - proc.info['create_time']) > 10:
+                        logger.info(f"Terminating: {name} (PID: {proc.pid})")
+                        proc.terminate()
+                        try: proc.wait(timeout=2)
+                        except psutil.TimeoutExpired: proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess): continue
+    except Exception as e: logger.error(f"Cleanup error: {e}")
 
 async def main():
-    loop = asyncio.get_running_loop()
-    
     # 强制清理函数
-    async def shutdown(signal=None):
-        if signal: logger.warning(f"Received exit signal {signal.name}...")
-        logger.info("Closing GenieBot and cleaning up resources...")
-        
-        # 停止调度器
+    async def shutdown():
+        logger.info("Graceful shutdown initiated...")
         scheduler_mgr.shutdown()
-        
-        # 强制杀死残留进程
         await cleanup_hanging_processes()
-        
-        # 取消所有运行中的任务
+        # 取消所有背景任务
         tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
         for t in tasks: t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        
-        loop.stop()
-
-    # 注册信号处理 (针对 Linux)
-    import signal
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s)))
 
     try:
-        await cleanup_hanging_processes(); logger.info("Starting GenieBot Bridge-03...")
-        scheduler_mgr.start(); await dp.start_polling(bot)
-    except asyncio.CancelledError:
-        pass
+        await cleanup_hanging_processes()
+        logger.info("Starting GenieBot Bridge-03...")
+        scheduler_mgr.start()
+        # 让 aiogram 处理信号，它会在收到 SIGINT 时停止轮询并返回
+        await dp.start_polling(bot)
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logger.error(f"Main loop error: {e}", exc_info=True)
     finally:
         await shutdown()
         logger.info("GenieBot stopped cleanly.")
+        # 强制退出进程，确保终端即时返回
+        os._exit(0)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-    except Exception:
-        sys.exit(1)

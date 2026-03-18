@@ -95,7 +95,10 @@ class NewspaperAgent(BaseAgent):
 
             # 4. 执行生图 (指定 3:2)
             vertex = registry.get_agent("vertex_generator")
-            return await vertex.execute(chat_id, prompt_or_template=final_prompt, aspect_ratio="3:2")
+            res = await vertex.execute(chat_id, prompt_or_template=final_prompt, aspect_ratio="3:2")
+            if res.status == "SUCCESS":
+                res.data["last_image_path"] = res.data.get("file_path")
+            return res
 
         except Exception as e:
             self.logger.error(f"Newspaper v3 failed: {e}")

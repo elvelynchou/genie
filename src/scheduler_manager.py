@@ -22,9 +22,14 @@ class SchedulerManager:
             logger.info("Scheduler is already running.")
             return
         
-        # 核心简化：每 10 分钟唤醒一次“赛博脉搏”
-        # 由 HeartbeatAgent 根据 HEARTBEAT.md 自行决定执行什么
-        self.scheduler.add_job(self.pulse, 'interval', minutes=10)
+        # 核心改进：开启任务合并，防止离线后疯狂补跑
+        self.scheduler.add_job(
+            self.pulse, 
+            'interval', 
+            minutes=10, 
+            misfire_grace_time=60, 
+            coalesce=True
+        )
         self.scheduler.start()
         logger.info("Scheduler started. Pulse interval: 10m.")
 

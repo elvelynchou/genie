@@ -67,7 +67,13 @@ class FinanceMonitorAgent(BaseAgent):
             self.logger.error("No data blocks found in browser results.")
             return AgentResult(status="FAILED", message="Browser extraction returned no readable content.")
 
-        self.logger.info(f"Retrieved {len(semantic_data_blocks)} data blocks. Starting analysis...")
+        # 支持话题隔离的存储 Key
+        tid = getattr(params, "message_thread_id", None)
+        mem_key = f"{chat_id}:{tid or 'main'}"
+        seen_key = f"seen_finance:{mem_key}"
+        digest_key = f"last_finance_digest:{mem_key}"
+
+        self.logger.info(f"Retrieved {len(semantic_data_blocks)} data blocks. Using memory key: {mem_key}")
         
         digest_payload = ""
         full_status_quo = "" 
@@ -98,7 +104,7 @@ class FinanceMonitorAgent(BaseAgent):
 
                 # 3.3 去重逻辑 (双重校验：物理指纹 + 语义指纹)
                 item_hash = hashlib.md5(clean_md.encode()).hexdigest()
-                is_physical_seen = self.redis_mgr.client.sismember(f"seen_finance:{chat_id}", item_hash)
+                is_physical_seen = self.redis_mgr.client.sismember(seen_key, item_hash)
                 
                 # 获取语义向量进行进一步校验
                 loop = asyncio.get_event_loop()
@@ -111,7 +117,7 @@ class FinanceMonitorAgent(BaseAgent):
                 # 判定决策：物理完全一致 OR 语义相似度极高 (>0.95)
                 is_duplicate = is_physical_seen or (semantic_sim > 0.95)
                 
-                # [审计回显] 打印详细决策过程到终端
+                # [审计回显]
                 audit_status = "DUPLICATE (SKIPPED)" if is_duplicate else "NEW CONTENT (ACCEPTED)"
                 if "🚨" in clean_md: audit_status = "ALERT (FORCED ACCEPT)"
                 
@@ -132,8 +138,8 @@ class FinanceMonitorAgent(BaseAgent):
                             )
                         
                         digest_payload += f"\n--- {name} ---\n{clean_md}\n"
-                        self.redis_mgr.client.sadd(f"seen_finance:{chat_id}", item_hash)
-                        self.redis_mgr.client.expire(f"seen_finance:{chat_id}", 172800)
+                        self.redis_mgr.client.sadd(seen_key, item_hash)
+                        self.redis_mgr.client.expire(seen_key, 172800)
                     except Exception as ai_e:
                         self.logger.error(f"AI enrichment failed for {name}: {ai_e}")
                 else:
@@ -157,10 +163,15 @@ class FinanceMonitorAgent(BaseAgent):
             )
 
         # 5. 生成总结报告
-        last_report = self.redis_mgr.client.get(f"last_finance_digest:{chat_id}")
+        last_report = self.redis_mgr.client.get(digest_key)
+        if not last_report:
+            # 回退到全局 Key 尝试
+            last_report = self.redis_mgr.client.get(f"last_finance_digest:{chat_id}")
+
         last_report_text = last_report.decode('utf-8') if last_report else "无上期报告。"
+
         analysis_prompt = f"对比上期：{last_report_text[:1500]}\n分析本期：{digest_payload[:10000]}\n仅报告新增重大事件。中文Markdown格式。"
-        
+
         try:
             loop = asyncio.get_event_loop()
             resp = await asyncio.wait_for(loop.run_in_executor(None, lambda: self.orchestrator.chat(analysis_prompt, [])), timeout=90)
@@ -168,11 +179,8 @@ class FinanceMonitorAgent(BaseAgent):
         except:
             digest_text = "摘要分析超时。"
 
-        # 6. 归档与返回最终摘要 (支持话题隔离)
-        tid = getattr(params, "message_thread_id", None)
-        mem_key = f"{chat_id}:{tid or 'main'}"
-        self.redis_mgr.client.set(f"last_finance_digest:{mem_key}", digest_text)
-        
+        # 6. 归档与返回最终摘要
+        self.redis_mgr.client.set(digest_key, digest_text)
         os.makedirs(self.FINANCE_DIR, exist_ok=True)
         report_path = os.path.join(self.FINANCE_DIR, f"Research_Report_{date_str}.md")
         with open(report_path, "w", encoding="utf-8") as f:
@@ -180,6 +188,12 @@ class FinanceMonitorAgent(BaseAgent):
 
         return AgentResult(
             status="SUCCESS",
-            data={"file_path": report_path, "report": digest_text, "files": file_list_msg},
+            data={
+                "file_path": report_path, 
+                "last_report_path": report_path,
+                "report": digest_text, 
+                "last_finance_digest": digest_text,
+                "files": file_list_msg
+            },
             message=f"Pipeline complete."
         )

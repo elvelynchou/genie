@@ -22,7 +22,12 @@
       {
         "step": "wait_after_upload",
         "action": "wait",
-        "params": { "seconds": 8 }
+        "params": { "seconds": 10 }
+      },
+      {
+        "step": "click_text_area",
+        "action": "click",
+        "params": { "selector": "[data-testid='tweetTextarea_0']" }
       },
       {
         "step": "type_content",
@@ -33,7 +38,7 @@
         }
       },
       {
-        "step": "final_check_wait",
+        "step": "wait_before_post",
         "action": "wait",
         "params": { "seconds": 5 }
       },
@@ -41,10 +46,6 @@
         "step": "click_post",
         "action": "click",
         "params": { "selector": "[data-testid='tweetButton']" }
-      },
-      {
-        "step": "debug_snapshot",
-        "action": "snapshot"
       },
       {
         "step": "confirm_finish",

@@ -43,26 +43,24 @@
     - Phase 3.5 多模态集成：图片感知 (`image_ocr`, `prompt_inverse`)，模板引擎 (`genimgtemplate`)，与生图后端 (`nanobanana`, `vertex_generator`)。
 - **待执行**: Phase 4 - 自我进化闭环 (Code Gen & Deploy)。
 
-## [SESSION_COMPRESSION_SNAPSHOT: PHASE_4_EVOLUTION_FINAL_STABILITY]
-**1. 核心架构进化 (Done):**
-- **Causal Graph-RAG**: 升级了记忆索引，支持 `relations` 字段。`MemoryRefiner` 现在能提取因果链条（原因 -> 结果 -> 教训），实现了逻辑级的经验闭环。
-- **L0-Safety-Gate**: 建立了基于因果审计的安全门机制。`SafetyAgent` 会在每一轮高危操作执行前进行意图审计与风险评分，防止系统在自进化过程中崩溃。
-- **Advanced Skill Routing**: 在 Bridge 层实现了针对特定任务（生图、发推、X抓取）的强力路由与工具箱收缩，杜绝了 AI 调用的逻辑漂移。
-- **CDP Native Upload**: `stealth_browser` 进化为支持 Chrome 原生 CDP 协议的物理级文件上传，彻底解决了社交平台隐藏输入框无法操作的难题。
+## [SESSION_COMPRESSION_SNAPSHOT: PHASE_4_EVOLUTION_STABLE_V2]
+**1. 核心架构稳定性 (Done):**
+- **Goal-Persistent Loop**: 重构了 `telegram_bridge.py` 的推理循环。引入了 `completed_subtasks` 追踪机制与增强版 Prompt，强制 Orchestrator 必须验证所有子任务完成后才输出最终回复，解决了长链任务中断的难题。
+- **Graceful Shutdown v2**: 实现了基于 `asyncio.Event` 与 `os._exit(0)` 的强力停机机制。解决了 `Ctrl+C` 信号冲突导致的进程残留，确保资源秒级回收。
+- **Anti-Explosion Heartbeat**: 在 `SchedulerManager` 中开启了任务合并 (`coalesce`) 与错失补偿限制。同时升级了 `HeartbeatAgent` 的决策逻辑，严禁触发 `running` 状态的任务，杜绝了离线后开机任务狂发的现象。
+- **Topic-Aware Data Alignment**: 统一了财经监控在话题模式下的 Redis Key 命名规范（`last_finance_digest:{chat_id}:{topic_id}`），修复了报告始终显示为“初次报告”的 Bug。
 
-**2. 交互与体验 (Done):**
-- **Newspaper v3.0**: 实现了横版高密度财经报纸自动生成引擎。支持物理文件直连、四维度精准排版与插图极小化。
-- **Graceful Shutdown**: 完善了 Linux 信号拦截与任务强制取消机制，解决了 Ctrl+C 无法中断主进程的顽疾。
-- **Topic Sharding**: 记忆分片完全成熟，支持不同话题下的独立上下文隔离。
+**2. 多代理协同增强 (Done):**
+- **Cross-Agent State Handoff**: 细化了状态键（`last_image_path`, `last_report_path`），确保在生成文档的同时，图片路径不会被覆盖，从而支撑“抓取 -> 文档 -> 生图 -> 发推”的高级联动。
+- **X-Upload Reliability**: 升级了 X 发布工作流，增加了“点击聚焦”与“渲染等待”步骤，配合 CDP 物理注入，大幅提升了带图发推的成功率。
 
 **3. 关键路径 (Key Paths):**
-- 文档: `HEARTBEAT.md` (脉搏协议), `SAFETY_GATE.md` (审计架构), `Setup.md` (构建指南)。
-- 配置: `src/agents/task_status.json` (任务备忘录), `src/agents/socialpub/x_workflow.json` (发推工作流)。
-- Agent: `src/agents/analyzer/safety_agent.py`, `src/agents/imgtools/newspaper_agent.py`。
+- 逻辑: `src/telegram_bridge.py` (主循环), `src/agents/analyzer/heartbeat_agent.py` (决策层)。
+- 存储: `src/agents/task_status.json` (任务追踪), Redis (L1-L3 记忆)。
 
 **4. 下一阶段目标 (Next):**
-- 完成 `CodeGenAgent` 与 `SandboxManager` 的热部署闭环。
-- 探索基于系统资源监控的自愈式故障恢复（Autonomic Recovery）。
+- 完成 `CodeGenAgent` 的物理沙盒热部署闭环。
+- 探索多 Bot 矩阵下的跨实体协同。
 
 ---
 *此文档由 AI 自动维护，作为系统运行的最高指令依据。*

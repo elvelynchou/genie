@@ -71,18 +71,23 @@ class HeartbeatAgent(BaseAgent):
         
         【你的任务】：
         对比当前时间和运行历史，根据协议判断现在是否需要执行任何任务。
-        
-        要求：
-        1. 输出严格的 JSON 格式。
-        2. "tasks_to_run" 是待执行的 Agent 列表（只能选: ["finance_monitor", "daily_report", "dreamer", "sys_check"]）。
-        3. 如果没有任务需要运行，返回 empty 列表。
+
+        重要规则：
+        1. 严禁触发状态为 "running" 的任务，防止并发冲突。
+        2. 如果距离上次执行时间过长（如超过24小时），仅补跑一次，不要连续触发。
+        3. 优先确保系统稳定，如果没有紧迫需求，请回复空列表。
+        输出严格的 JSON 格式：
+        {{
+          "tasks_to_run": ["finance_monitor"],
+          "rationale": "距离上次运行已超过30分钟，且当前不在静默期。"
+        }}
         """
 
         try:
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, lambda: self.orchestrator.chat(decision_prompt, []))
             processed = self.orchestrator.process_response(response)
-            
+
             raw_decision = processed.get("content", "{}")
             json_str = raw_decision.replace("```json", "").replace("```", "").strip()
             decision = json.loads(json_str)
